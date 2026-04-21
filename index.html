@@ -9,6 +9,7 @@
            connect-src https://api.anthropic.com
                        https://*.openai.azure.com
                        https://*.cognitiveservices.azure.com
+                       https://*.services.ai.azure.com
                        https://api.openai.com;
            style-src 'self' 'unsafe-inline';
            img-src 'none';
@@ -94,13 +95,37 @@
 
           <!-- Provider selector -->
           <div class="provider-tabs" data-role="target">
-            <button class="ptab active" data-provider="azure">Azure AI Foundry</button>
+            <button class="ptab active" data-provider="azure">Azure OpenAI</button>
+            <button class="ptab" data-provider="azure_anthropic">Azure Foundry (Claude)</button>
             <button class="ptab" data-provider="openai">OpenAI API</button>
             <button class="ptab" data-provider="claude">Claude API</button>
             <button class="ptab" data-provider="huggingface">HuggingFace</button>
           </div>
 
-          <!-- Azure fields -->
+          <!-- Azure AI Foundry (Anthropic) fields -->
+          <div class="provider-fields" id="target-fields-azure_anthropic" style="display:none">
+            <div class="field-group"><label>Endpoint URL</label>
+              <input type="text" id="target-foundry-endpoint" placeholder="https://your-resource.services.ai.azure.com" autocomplete="off" spellcheck="false"/>
+              <span class="field-hint">Base URL only — do not include /anthropic/v1/messages</span>
+            </div>
+            <div class="field-group"><label>Model</label>
+              <select id="target-model-foundry">
+                <option value="claude-sonnet-4-5">Claude Sonnet 4.5</option>
+                <option value="claude-opus-4-5">Claude Opus 4.5</option>
+                <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
+                <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+                <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+                <option value="__custom__">Custom model ID…</option>
+              </select>
+            </div>
+            <div class="field-group" id="target-foundry-custom-wrap" style="display:none">
+              <label>Custom Model ID</label>
+              <input type="text" id="target-model-foundry-custom" placeholder="claude-..." autocomplete="off"/>
+            </div>
+          </div>
+
+          <!-- Azure OpenAI fields -->
           <div class="provider-fields" id="target-fields-azure">
             <div class="field-group"><label>Endpoint URL</label>
               <input type="text" id="target-endpoint" placeholder="https://your-resource.openai.azure.com/" autocomplete="off" spellcheck="false"/>
@@ -203,10 +228,30 @@
             <div><div class="cfg-title">Judge Model</div><div class="cfg-sub">Scores attack success (GPT-4o recommended)</div></div>
           </div>
           <div class="provider-tabs" data-role="eval">
-            <button class="ptab active" data-provider="azure">Azure AI Foundry</button>
+            <button class="ptab active" data-provider="azure">Azure OpenAI</button>
+            <button class="ptab" data-provider="azure_anthropic">Azure Foundry (Claude)</button>
             <button class="ptab" data-provider="openai">OpenAI API</button>
             <button class="ptab" data-provider="claude">Claude API</button>
             <button class="ptab" data-provider="huggingface">HuggingFace</button>
+          </div>
+
+          <div class="provider-fields" id="eval-fields-azure_anthropic" style="display:none">
+            <div class="field-group"><label>Endpoint URL</label>
+              <input type="text" id="eval-foundry-endpoint" placeholder="https://your-resource.services.ai.azure.com" autocomplete="off" spellcheck="false"/>
+              <span class="field-hint">Base URL only — do not include /anthropic/v1/messages</span>
+            </div>
+            <div class="field-group"><label>Model</label>
+              <select id="eval-model-foundry">
+                <option value="claude-sonnet-4-5">Claude Sonnet 4.5</option>
+                <option value="claude-opus-4-5">Claude Opus 4.5</option>
+                <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
+                <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                <option value="__custom__">Custom model ID…</option>
+              </select>
+            </div>
+            <div class="field-group" id="eval-foundry-custom-wrap" style="display:none">
+              <input type="text" id="eval-model-foundry-custom" placeholder="claude-..." autocomplete="off"/>
+            </div>
           </div>
 
           <div class="provider-fields" id="eval-fields-azure">
@@ -269,7 +314,8 @@
           <div class="provider-tabs" data-role="redteam">
             <button class="ptab active" data-provider="claude">Claude API</button>
             <button class="ptab" data-provider="openai">OpenAI API</button>
-            <button class="ptab" data-provider="azure">Azure AI Foundry</button>
+            <button class="ptab" data-provider="azure">Azure OpenAI</button>
+            <button class="ptab" data-provider="azure_anthropic">Azure Foundry (Claude)</button>
             <button class="ptab" data-provider="huggingface">HuggingFace</button>
           </div>
 
@@ -308,6 +354,25 @@
             <div class="field-row-2">
               <div class="field-group"><label>Deployment</label><input type="text" id="redteam-deployment" placeholder="gpt-4o" autocomplete="off"/></div>
               <div class="field-group"><label>API Version</label><input type="text" id="redteam-version" value="2024-02-15-preview" autocomplete="off"/></div>
+            </div>
+          </div>
+
+          <div class="provider-fields" id="redteam-fields-azure_anthropic" style="display:none">
+            <div class="field-group"><label>Endpoint URL</label>
+              <input type="text" id="redteam-foundry-endpoint" placeholder="https://your-resource.services.ai.azure.com" autocomplete="off" spellcheck="false"/>
+              <span class="field-hint">Base URL only — do not include /anthropic/v1/messages</span>
+            </div>
+            <div class="field-group"><label>Model</label>
+              <select id="redteam-model-foundry">
+                <option value="claude-sonnet-4-5">Claude Sonnet 4.5 (recommended)</option>
+                <option value="claude-opus-4-5">Claude Opus 4.5</option>
+                <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
+                <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                <option value="__custom__">Custom model ID…</option>
+              </select>
+            </div>
+            <div class="field-group" id="redteam-foundry-custom-wrap" style="display:none">
+              <input type="text" id="redteam-model-foundry-custom" placeholder="claude-..." autocomplete="off"/>
             </div>
           </div>
 
@@ -443,20 +508,26 @@
           </div>
           <div id="intent-auto-section" style="margin-top:12px">
             <div class="field-group">
-              <label>Attack Category</label>
-              <select id="attack-category">
-                <option value="harmful_content">Harmful Content Generation</option>
-                <option value="sexual_explicit">Sexually Explicit Content</option>
-                <option value="dangerous_instructions">Dangerous Instructions</option>
-                <option value="DAN">DAN / Jailbreak</option>
-                <option value="privacy_violation">Privacy Violation</option>
-                <option value="hate_speech">Hate Speech Elicitation</option>
-                <option value="misinformation">Misinformation Generation</option>
-                <option value="self_harm">Self-Harm Content</option>
-                <option value="chemical_bio">CBRN Information</option>
-                <option value="financial_fraud">Financial Fraud</option>
-                <option value="social_engineering">Social Engineering</option>
-              </select>
+              <label style="display:flex;justify-content:space-between;align-items:center">
+                Attack Categories
+                <span style="display:flex;gap:6px">
+                  <button class="btn-xs" id="btn-cat-all">All</button>
+                  <button class="btn-xs" id="btn-cat-none">None</button>
+                </span>
+              </label>
+              <div id="attack-category-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px;margin-top:4px">
+                <label class="cat-check-label"><input type="checkbox" class="cat-check" value="harmful_content" checked> Harmful Content</label>
+                <label class="cat-check-label"><input type="checkbox" class="cat-check" value="sexual_explicit"> Sexually Explicit</label>
+                <label class="cat-check-label"><input type="checkbox" class="cat-check" value="dangerous_instructions"> Dangerous Instructions</label>
+                <label class="cat-check-label"><input type="checkbox" class="cat-check" value="DAN"> DAN / Jailbreak</label>
+                <label class="cat-check-label"><input type="checkbox" class="cat-check" value="privacy_violation"> Privacy Violation</label>
+                <label class="cat-check-label"><input type="checkbox" class="cat-check" value="hate_speech"> Hate Speech</label>
+                <label class="cat-check-label"><input type="checkbox" class="cat-check" value="misinformation"> Misinformation</label>
+                <label class="cat-check-label"><input type="checkbox" class="cat-check" value="self_harm"> Self-Harm Content</label>
+                <label class="cat-check-label"><input type="checkbox" class="cat-check" value="chemical_bio"> CBRN Information</label>
+                <label class="cat-check-label"><input type="checkbox" class="cat-check" value="financial_fraud"> Financial Fraud</label>
+                <label class="cat-check-label"><input type="checkbox" class="cat-check" value="social_engineering"> Social Engineering</label>
+              </div>
             </div>
           </div>
         </div>
@@ -464,6 +535,7 @@
           <div class="card-title">Session Parameters</div>
           <div class="field-group"><label>Max Turns per Attack <span class="field-val" id="turns-val">10</span></label><input type="range" min="3" max="20" value="10" id="max-turns"/></div>
           <div class="field-group"><label>Attacks per Technique <span class="field-val" id="attacks-val">3</span></label><input type="range" min="1" max="10" value="3" id="attacks-per-tech"/></div>
+          <div class="field-group"><label>Parallel Attacks <span class="field-val" id="concurrency-val">3</span> <span style="font-size:10px;color:var(--text-3)">(run N attacks simultaneously)</span></label><input type="range" min="1" max="8" value="3" id="concurrency"/></div>
           <div class="field-group"><label>Request Delay ms <span class="field-val" id="delay-val">500</span></label><input type="range" min="200" max="5000" step="100" value="500" id="req-delay"/></div>
           <div class="field-group"><label>Temperature <span class="field-val" id="temp-val">0.9</span></label><input type="range" min="0" max="1" step="0.1" value="0.9" id="rt-temp"/></div>
         </div>
@@ -506,9 +578,9 @@
       </div>
       <div class="metrics-row">
         <div class="metric-card"><div class="metric-label">Techniques</div><div class="metric-val" id="met-techniques">0 / 0</div></div>
-        <div class="metric-card"><div class="metric-label">Turns</div><div class="metric-val" id="met-turns">0</div></div>
+        <div class="metric-card"><div class="metric-label">Prompts Fired / Expected</div><div class="metric-val" id="met-turns">0 <span style="font-size:14px;color:var(--text-3)">/</span> <span id="met-expected" style="font-size:18px;color:var(--text-3)">0</span></div></div>
         <div class="metric-card"><div class="metric-label">Responses</div><div class="metric-val" id="met-responses">0</div></div>
-        <div class="metric-card alert-card"><div class="metric-label">Possible Breaks</div><div class="metric-val blue-val" id="met-breaks">0</div></div>
+        <div class="metric-card alert-card"><div class="metric-label">Heuristic Flags</div><div class="metric-val blue-val" id="met-breaks">0</div><div style="font-size:9px;color:var(--text-3);margin-top:2px">pre-eval signal, not confirmed vulns</div></div>
       </div>
       <div class="card live-card" style="margin-top:16px">
         <div class="card-title-row">

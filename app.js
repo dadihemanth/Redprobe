@@ -19,6 +19,20 @@ const S = {
 
 const $ = id => document.getElementById(id);
 const val = id => ($(id) && $(id).value ? $(id).value.trim() : '');
+
+function getSelectedCategories() {
+  const checked = document.querySelectorAll('.cat-check:checked');
+  const cats = [...checked].map(el => el.value);
+  return cats.length ? cats : ['harmful_content'];
+}
+
+function computeExpectedPrompts(techniques, attacksPerTech, fallbackMaxTurns) {
+  return techniques.reduce((sum, tech) => {
+    const turns = (tech.customTurns > 0 ? tech.customTurns :
+                   (TECHNIQUE_DEFAULT_TURNS[tech.id] || fallbackMaxTurns));
+    return sum + Math.min(turns, 30) * attacksPerTech;
+  }, 0);
+}
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
 // ── View routing ──────────────────────────────────────────────────────────────
@@ -44,8 +58,11 @@ document.querySelectorAll('.eye-btn').forEach(btn => {
 
 // ── Provider tabs ─────────────────────────────────────────────────────────────
 const KEY_LABELS = {
-  azure: 'Azure API Key', openai: 'OpenAI API Key (sk-…)',
-  claude: 'Anthropic API Key (sk-ant-…)', huggingface: 'HuggingFace Token (hf_…)'
+  azure:            'Azure API Key',
+  azure_anthropic:  'Azure AI Foundry API Key',
+  openai:           'OpenAI API Key (sk-…)',
+  claude:           'Anthropic API Key (sk-ant-…)',
+  huggingface:      'HuggingFace Token (hf_…)'
 };
 
 document.querySelectorAll('.provider-tabs').forEach(tabGroup => {
@@ -61,7 +78,7 @@ document.querySelectorAll('.provider-tabs').forEach(tabGroup => {
 });
 
 function switchProviderFields(role, provider) {
-  ['azure','openai','claude','huggingface'].forEach(p => {
+  ['azure','azure_anthropic','openai','claude','huggingface'].forEach(p => {
     const el = $(`${role}-fields-${p}`);
     if (el) el.style.display = (p === provider) ? '' : 'none';
   });
@@ -71,7 +88,7 @@ function switchProviderFields(role, provider) {
 
 // Custom model dropdowns
 ['target','eval','redteam'].forEach(role => {
-  ['openai','claude','hf'].forEach(prov => {
+  ['openai','claude','hf','foundry'].forEach(prov => {
     const sel = $(`${role}-model-${prov}`);
     if (!sel) return;
     sel.addEventListener('change', () => {
@@ -94,6 +111,13 @@ function buildCfg(role) {
     if (!ep)  throw new Error(`Azure endpoint missing for ${role}`);
     if (!dep) throw new Error(`Azure deployment name missing for ${role}`);
     return { provider: 'azure', key, endpoint: ep, deployment: dep, version: ver };
+  }
+  if (provider === 'azure_anthropic') {
+    const ep  = val(`${role}-foundry-endpoint`).replace(/\/$/, '');
+    const sel = $(`${role}-model-foundry`);
+    const model = sel && sel.value !== '__custom__' ? sel.value : (val(`${role}-model-foundry-custom`) || 'claude-sonnet-4-5');
+    if (!ep) throw new Error(`Azure AI Foundry endpoint missing for ${role}`);
+    return { provider: 'azure_anthropic', key, endpoint: ep, model };
   }
   if (provider === 'openai') {
     const sel   = $(`${role}-model-openai`);
@@ -171,6 +195,12 @@ $('btn-run-audit').addEventListener('click', () => {
       const dep = val(`${role}-deployment`);
       if (dep && !SEC.validateModel(dep))
         issues.push({ sev:'MEDIUM', msg:`${role} deployment name has invalid characters` });
+    }
+    if (provider === 'azure_anthropic') {
+      const ep = val(`${role}-foundry-endpoint`).replace(/\/$/, '');
+      if (ep && !SEC.validateEndpoint('azure_anthropic', ep))
+        issues.push({ sev:'HIGH', msg:`${role} Azure AI Foundry endpoint must be https://*.services.ai.azure.com` });
+      else if (ep) ok.push(`${role} Azure AI Foundry endpoint validated`);
     }
     if (provider === 'huggingface') {
       const ep = val(`${role}-hf-endpoint`);
@@ -443,8 +473,8 @@ function updateTechCount() {
 $('btn-select-all').addEventListener('click', () => { TECHNIQUES.forEach(t=>S.selectedTechniques.add(t.id)); renderTechniqueGrid(); });
 $('btn-deselect-all').addEventListener('click', () => { S.selectedTechniques.clear(); renderTechniqueGrid(); });
 
-['max-turns','attacks-per-tech','req-delay','rt-temp'].forEach(id => {
-  const m={'max-turns':'turns-val','attacks-per-tech':'attacks-val','req-delay':'delay-val','rt-temp':'temp-val'};
+['max-turns','attacks-per-tech','concurrency','req-delay','rt-temp'].forEach(id => {
+  const m={'max-turns':'turns-val','attacks-per-tech':'attacks-val','concurrency':'concurrency-val','req-delay':'delay-val','rt-temp':'temp-val'};
   $(id).addEventListener('input', e => $(m[id]).textContent = e.target.value);
 });
 
@@ -456,6 +486,10 @@ document.querySelectorAll('input[name="intent-mode"]').forEach(r => {
   });
 });
 
+// Category All / None buttons
+$('btn-cat-all').addEventListener('click',  () => document.querySelectorAll('.cat-check').forEach(el => el.checked = true));
+$('btn-cat-none').addEventListener('click', () => document.querySelectorAll('.cat-check').forEach(el => el.checked = false));
+
 $('btn-preview-attack').addEventListener('click', async () => {
   const isManual = $('intent-manual').checked, prev = $('intent-preview');
   if (isManual) { prev.textContent = val('custom-intent') || '(no intent entered)'; prev.style.display=''; return; }
@@ -463,10 +497,11 @@ $('btn-preview-attack').addEventListener('click', async () => {
   try { rtCfg = buildCfg('redteam'); } catch(e) { prev.textContent='Configure Red Team model first.'; prev.style.display=''; return; }
   prev.textContent='Generating…'; prev.style.display='';
   const tech = TECHNIQUES.find(t=>S.selectedTechniques.has(t.id)) || TECHNIQUES[0];
-  const cat  = val('attack-category');
+  const cats = getSelectedCategories();
+  const cat  = cats[0];
   const dummy = new RedTeamAttacker({ rtCfg, tgtCfg:{} });
   const intent = await dummy.generateIntent(cat, tech).catch(e=>'Error: '+e.message);
-  prev.textContent='Intent: '+intent;
+  prev.textContent=`Intent (${cat}): ${intent}`;
 });
 
 // ── Launch attack ─────────────────────────────────────────────────────────────
@@ -490,17 +525,13 @@ $('btn-start-attack').addEventListener('click', async () => {
 
   $('live-log').innerHTML = '';
   S.allRecords = []; S.evaluatedRecords = [];
-  S.metrics = { techniques: S.selectedTechniques.size, turns:0, responses:0, breaks:0, done:0, errors:0 };
-  // Reset result table
-  $('results-tbody').innerHTML = '<tr><td colspan="8" class="empty-row">No results yet.</td></tr>';
-  $('records-count').textContent = '0 records';
-  updateMetrics();
 
   const maxTurns       = parseInt(val('max-turns'))       || 10;
   const attacksPerTech = parseInt(val('attacks-per-tech')) || 3;
+  const concurrency    = parseInt(val('concurrency'))      || 3;
   const delay          = parseInt(val('req-delay'))        || 500;
   const temperature    = parseFloat(val('rt-temp'))        || 0.9;
-  const category       = val('attack-category');
+  const categories     = getSelectedCategories();
   const isManual       = $('intent-manual').checked;
   const customIntent   = isManual ? val('custom-intent') : null;
 
@@ -510,8 +541,17 @@ $('btn-start-attack').addEventListener('click', async () => {
     customTurns: S.perTechTurns[t.id] || 0
   }));
 
+  const expectedPrompts = computeExpectedPrompts(techniques, attacksPerTech, maxTurns);
+  // total attack tasks = techniques × attacksPerTech (each task is one independent attack run)
+  S.metrics = { techniques: techniques.length * attacksPerTech, turns:0, responses:0, breaks:0, done:0, errors:0, expected: expectedPrompts };
+
+  // Reset result table
+  $('results-tbody').innerHTML = '<tr><td colspan="8" class="empty-row">No results yet.</td></tr>';
+  $('records-count').textContent = '0 records';
+  updateMetrics();
+
   S.activeAttacker = new RedTeamAttacker({
-    rtCfg, tgtCfg, maxTurns, delay, temperature,
+    rtCfg, tgtCfg, maxTurns, delay, temperature, concurrency,
     onLog:    e  => addLogEntry(e),
     onMetric: t  => {
       if (t === 'turns')           S.metrics.turns++;
@@ -532,7 +572,7 @@ $('btn-start-attack').addEventListener('click', async () => {
   $('btn-stop-attack').style.display = 'inline-block';
   $('running-badge').style.display   = 'inline-flex';
 
-  try { await S.activeAttacker.runSession({ techniques, category, intentMode:isManual?'manual':'auto', customIntent, attacksPerTechnique:attacksPerTech }); }
+  try { await S.activeAttacker.runSession({ techniques, categories, intentMode:isManual?'manual':'auto', customIntent, attacksPerTechnique:attacksPerTech, concurrency }); }
   catch(e) { addLogEntry({ type:'system', message:'Session error: '+e.message, technique:'System' }); }
 
   S.running = false;
@@ -549,7 +589,8 @@ $('btn-stop-attack').addEventListener('click', () => {
   if (S.activeAttacker) S.activeAttacker.stop();
   S.running = false;
   $('btn-stop-attack').style.display = 'none'; $('running-badge').style.display = 'none';
-  addLogEntry({ type:'system', message:'Stopped by user.', technique:'System' });
+  addLogEntry({ type:'system', message:`Stopped by user. ${S.allRecords.length} records captured — switch to Results to evaluate.`, technique:'System' });
+  if (S.allRecords.length) $('btn-run-eval').style.display = 'inline-flex';
 });
 
 // ── Live log ──────────────────────────────────────────────────────────────────
@@ -575,6 +616,7 @@ function updateMetrics() {
   const total = S.allRecords.length;
   $('met-techniques').textContent = S.metrics.done + ' / ' + S.metrics.techniques;
   $('met-turns').textContent      = S.metrics.turns;
+  if ($('met-expected')) $('met-expected').textContent = S.metrics.expected ?? 0;
   $('met-responses').textContent  = S.metrics.responses;
   $('met-breaks').textContent     = S.metrics.breaks;
   $('records-count').textContent  = `${total} records`;

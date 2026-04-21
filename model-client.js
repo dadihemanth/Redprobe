@@ -3,15 +3,17 @@
 
 // ─── Security helpers ─────────────────────────────────────────────────────────
 const SEC = {
-  AZURE_HOST_RE: /^https:\/\/[a-zA-Z0-9][a-zA-Z0-9\-]{0,62}\.(openai\.azure\.com|cognitiveservices\.azure\.com)(\/.*)?$/,
-  MODEL_RE:      /^[a-zA-Z0-9][\w\-\.\/]{0,126}$/,
-  VERSION_RE:    /^[0-9]{4}-[0-9]{2}-[0-9]{2}(-preview)?$/,
+  AZURE_HOST_RE:    /^https:\/\/[a-zA-Z0-9][a-zA-Z0-9\-]{0,62}\.(openai\.azure\.com|cognitiveservices\.azure\.com)(\/.*)?$/,
+  AZURE_FOUNDRY_RE: /^https:\/\/[a-zA-Z0-9][a-zA-Z0-9\-]{0,100}\.services\.ai\.azure\.com(\/.*)?$/,
+  MODEL_RE:         /^[a-zA-Z0-9][\w\-\.\/]{0,126}$/,
+  VERSION_RE:       /^[0-9]{4}-[0-9]{2}-[0-9]{2}(-preview)?$/,
 
   validateEndpoint(provider, url) {
     if (!url || typeof url !== 'string' || url.length > 512) return false;
     try { const u = new URL(url); if (u.protocol !== 'https:') return false; }
     catch { return false; }
-    if (provider === 'azure')  return this.AZURE_HOST_RE.test(url);
+    if (provider === 'azure')            return this.AZURE_HOST_RE.test(url);
+    if (provider === 'azure_anthropic')  return this.AZURE_FOUNDRY_RE.test(url);
     if (provider === 'claude') return url === 'https://api.anthropic.com' || url.startsWith('https://api.anthropic.com/');
     if (provider === 'openai') return url === 'https://api.openai.com'    || url.startsWith('https://api.openai.com/');
     return false;
@@ -39,15 +41,22 @@ const SEC = {
   }
 };
 
-// ─── In-memory rate limiter (per provider, 60 req/min) ────────────────────────
+// ─── In-memory rate limiter (per provider, 120 req/min soft cap) ─────────────
+// Waits for the window to reset instead of throwing — parallel attacks can
+// burst past 60/min legitimately; let the real API 429s be the hard limit.
 const RateLimit = {
   _state: {},
-  check(provider) {
+  async wait(provider, limit = 120) {
     const now = Date.now();
-    const s   = this._state;
-    if (!s[provider] || now - s[provider].t > 60000) s[provider] = { count: 0, t: now };
-    if (s[provider].count >= 60) throw new Error(`Rate limit: ${provider} (>60/min). Add delay.`);
-    s[provider].count++;
+    if (!this._state[provider] || now - this._state[provider].t > 60000) {
+      this._state[provider] = { count: 0, t: now };
+    }
+    if (this._state[provider].count >= limit) {
+      const waitMs = Math.max(200, 60100 - (Date.now() - this._state[provider].t));
+      await new Promise(r => setTimeout(r, waitMs));
+      this._state[provider] = { count: 0, t: Date.now() };
+    }
+    this._state[provider].count++;
   }
 };
 
@@ -74,11 +83,26 @@ class ModelClient {
     const safeSystem = opts.systemPrompt ? SEC.sanitize(opts.systemPrompt, 8000) : undefined;
 
     switch (cfg.provider) {
-      case 'azure':  return ModelClient._azure(cfg, safeMsgs, safeSystem, maxTokens, temperature);
-      case 'claude': return ModelClient._claude(cfg, safeMsgs, safeSystem, maxTokens, temperature);
-      case 'openai': return ModelClient._openai(cfg, safeMsgs, safeSystem, maxTokens, temperature);
+      case 'azure':            return ModelClient._azure(cfg, safeMsgs, safeSystem, maxTokens, temperature);
+      case 'azure_anthropic':  return ModelClient._azure_anthropic(cfg, safeMsgs, safeSystem, maxTokens, temperature);
+      case 'claude':           return ModelClient._claude(cfg, safeMsgs, safeSystem, maxTokens, temperature);
+      case 'openai':           return ModelClient._openai(cfg, safeMsgs, safeSystem, maxTokens, temperature);
       default: throw new Error(`Unknown provider: ${SEC.sanitize(cfg.provider, 20)}`);
     }
+  }
+
+  // Shared fetch with automatic 429 backoff (up to 3 retries)
+  static async _fetchWithRetry(url, options, maxRetries = 3) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const res = await fetch(url, options);
+      if (res.status !== 429) return res;
+      const retryAfterSec = parseInt(res.headers.get('Retry-After') || '0');
+      const waitMs = retryAfterSec > 0
+        ? retryAfterSec * 1000
+        : Math.min(Math.pow(2, attempt + 1) * 1000, 30000);
+      await new Promise(r => setTimeout(r, waitMs));
+    }
+    return fetch(url, options); // final attempt
   }
 
   static async _azure(cfg, msgs, system, maxTokens, temp) {
@@ -90,12 +114,12 @@ class ModelClient {
     if (!SEC.validateModel(dep))             throw new Error('Invalid deployment/model name');
     if (!SEC.validateApiVersion(ver))        throw new Error('Invalid API version (expected YYYY-MM-DD[-preview])');
 
-    RateLimit.check('azure');
+    await RateLimit.wait('azure');
 
     const allMsgs = system ? [{ role: 'system', content: system }, ...msgs] : msgs;
     const url     = `${ep}/openai/deployments/${dep}/chat/completions?api-version=${ver}`;
 
-    const res = await fetch(url, {
+    const res = await ModelClient._fetchWithRetry(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'api-key': cfg.key },
       body: JSON.stringify({ messages: allMsgs, max_tokens: maxTokens, temperature: temp })
@@ -108,10 +132,44 @@ class ModelClient {
     return d.choices?.[0]?.message?.content || '';
   }
 
+  static async _azure_anthropic(cfg, msgs, system, maxTokens, temp) {
+    // Azure AI Foundry endpoint hosting Anthropic Claude models.
+    // Uses Anthropic message format + api-key auth (not the OpenAI chat/completions path).
+    const base  = (cfg.endpoint || '').replace(/\/$/, '').replace(/\/anthropic\/v1\/messages$/, '');
+    const model = SEC.sanitize(cfg.model || cfg.deployment || 'claude-sonnet-4-5', 128);
+
+    if (!SEC.validateEndpoint('azure_anthropic', base))
+      throw new Error('Invalid Azure AI Foundry endpoint. Must be https://*.services.ai.azure.com');
+    if (!SEC.validateModel(model)) throw new Error('Invalid model name');
+
+    await RateLimit.wait('azure_anthropic');
+
+    const url  = `${base}/anthropic/v1/messages`;
+    const body = { model, max_tokens: maxTokens, temperature: temp,
+                   messages: msgs.filter(m => m.role !== 'system') };
+    if (system) body.system = system;
+
+    const res = await ModelClient._fetchWithRetry(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': cfg.key,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const e = await res.text().catch(() => '');
+      throw new Error(`Azure Foundry (Anthropic) ${res.status}: ${SEC.sanitize(e, 250)}`);
+    }
+    const d = await res.json();
+    return d.content?.[0]?.text || '';
+  }
+
   static async _claude(cfg, msgs, system, maxTokens, temp) {
     const model = SEC.sanitize(cfg.model || 'claude-sonnet-4-20250514', 128);
     if (!SEC.validateModel(model)) throw new Error('Invalid Claude model name');
-    RateLimit.check('claude');
+    await RateLimit.wait('claude');
 
     const body = {
       model, max_tokens: maxTokens, temperature: temp,
@@ -119,7 +177,7 @@ class ModelClient {
     };
     if (system) body.system = system;
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await ModelClient._fetchWithRetry('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': cfg.key, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify(body)
@@ -135,11 +193,11 @@ class ModelClient {
   static async _openai(cfg, msgs, system, maxTokens, temp) {
     const model = SEC.sanitize(cfg.model || 'gpt-4o', 128);
     if (!SEC.validateModel(model)) throw new Error('Invalid OpenAI model name');
-    RateLimit.check('openai');
+    await RateLimit.wait('openai');
 
     const allMsgs = system ? [{ role: 'system', content: system }, ...msgs] : msgs;
 
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    const res = await ModelClient._fetchWithRetry('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.key}` },
       body: JSON.stringify({ model, messages: allMsgs, max_tokens: maxTokens, temperature: temp })
@@ -251,7 +309,7 @@ ModelClient._huggingface = async function(cfg, msgs, opts = {}) {
 
   if (!model) throw new Error('HuggingFace: model name required');
   if (!SEC.validateModel(model)) throw new Error('HuggingFace: invalid model name');
-  RateLimit.check('huggingface');
+  await RateLimit.wait('huggingface');
 
   // Custom endpoint or default inference API
   const customEp = cfg.endpoint ? cfg.endpoint.replace(/\/$/, '') : null;
@@ -280,7 +338,7 @@ ModelClient._huggingface = async function(cfg, msgs, opts = {}) {
     stream: false
   };
 
-  const res = await fetch(url, {
+  const res = await ModelClient._fetchWithRetry(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

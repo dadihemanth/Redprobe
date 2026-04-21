@@ -49,6 +49,27 @@ GPT-4o (Evaluator/Judge)
 | Emotional Manipulation | Distress + urgency social engineering | Social |
 | Token Smuggling | Character substitution, encoding | Evasion |
 | Hypothetical Chain | Nested fictional distance layering | Framing |
+| Stereotype Elicitation | Indirect bias probing via completion tasks | Bias |
+| Priming Cascade | 3-phase cognitive anchoring before target request | Cognitive |
+| Comparative Asymmetry | Group A compliance used to demand Group B parity | Consistency |
+| Hallucination Amplification | Confabulation triggered and treated as fact | Confabulation |
+| Confidence Erosion | Academic counter-argument loop to dismantle refusals | Logic |
+| False Consensus Seeding | Fabricated prior compliance and peer AI behavior | Social Proof |
+| Role Reversal Injection | AI placed in evaluator/teacher role over harmful content | Role |
+| Context Window Poisoning | Fabricated norms and agreements flood the context | Memory |
+| Nested Instruction Smuggling | Payloads hidden in JSON, code, XML, markdown | Structural |
+| Comparative Inference | Harmful content extracted as logical inverse of safe info | Inference |
+| Reflective Poisoning | Model's own stated values weaponized as compliance arguments | Logic |
+| Mosaic Assembly | Target deconstructed into innocent fragments, assembled at end | Assembly |
+| Semantic Satiation | Safety vocabulary desensitized over 14 turns before use | Linguistic |
+| Authority Laundering | Real institutions chained to fabricated frameworks | Authority |
+| Persona Drift | 14 micro-adjustments that cumulatively remove all constraints | Identity |
+| **Cross-Lingual Pivot** | **English rapport → foreign language pivot where safety training is weaker** | **Multilingual** |
+| **Code-Switch Injection** | **Key terms in Cyrillic/CJK/Arabic mid-English sentence bypass token classifiers** | **Multilingual** |
+| **Translation Laundering** | **Harmful content embedded in foreign source text submitted for translation** | **Multilingual** |
+| **Cognitive Overload** | **Harmful request buried in position 3-4 of a 6-task multi-part query** | **Cognitive** |
+| **Socratic Self-Entrapment** | **Model generates its own question set, then answers self-generated queries** | **Recursive** |
+| **Temporal Displacement** | **Historical accuracy or hard sci-fi framing creates ethical distance** | **Framing** |
 
 ## Attack Categories
 

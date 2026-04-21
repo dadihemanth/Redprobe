@@ -284,6 +284,21 @@ input[type="range"] {
 .radio-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
 .radio-label input[type="radio"] { accent-color: var(--blue); }
 
+/* ── CATEGORY CHECKBOXES ────────────────────────────────────────────────── */
+.cat-check-label {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11px; color: var(--text-2); cursor: pointer;
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 10px;
+  transition: border-color 0.15s, background 0.15s;
+  user-select: none;
+}
+.cat-check-label:hover { border-color: var(--blue); color: var(--text-1); }
+.cat-check-label:has(input:checked) {
+  border-color: var(--blue); background: var(--blue-dim); color: var(--blue-bright);
+}
+.cat-check-label input[type="checkbox"] { accent-color: var(--blue); width: 13px; height: 13px; }
+
 /* ── TECHNIQUE GRID ─────────────────────────────────────────────────────── */
 .technique-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
 
