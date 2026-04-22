@@ -284,21 +284,6 @@ input[type="range"] {
 .radio-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
 .radio-label input[type="radio"] { accent-color: var(--blue); }
 
-/* ── CATEGORY CHECKBOXES ────────────────────────────────────────────────── */
-.cat-check-label {
-  display: flex; align-items: center; gap: 7px;
-  font-size: 11px; color: var(--text-2); cursor: pointer;
-  background: var(--bg-2); border: 1px solid var(--border);
-  border-radius: 6px; padding: 6px 10px;
-  transition: border-color 0.15s, background 0.15s;
-  user-select: none;
-}
-.cat-check-label:hover { border-color: var(--blue); color: var(--text-1); }
-.cat-check-label:has(input:checked) {
-  border-color: var(--blue); background: var(--blue-dim); color: var(--blue-bright);
-}
-.cat-check-label input[type="checkbox"] { accent-color: var(--blue); width: 13px; height: 13px; }
-
 /* ── TECHNIQUE GRID ─────────────────────────────────────────────────────── */
 .technique-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
 
@@ -596,3 +581,77 @@ input[type="range"] {
 
 /* Table 8-column layout */
 .results-table td:last-child, .results-table th:last-child { max-width: 100px; }
+
+
+/* ── v5 additions ────────────────────────────────────────────────────────── */
+
+/* Sidebar collapse */
+#app { display: flex; height: 100vh; transition: none; }
+.sidebar { transition: width 0.22s ease, opacity 0.2s ease; width: var(--sidebar-w,220px); overflow: hidden; }
+#app.sidebar-closed .sidebar { width: 0; opacity: 0; pointer-events: none; border: none; }
+#app.sidebar-closed .sidebar-text { display: none; }
+.sidebar-collapse-btn {
+  margin-left: auto; background: none; border: none;
+  color: var(--text-3); cursor: pointer; padding: 2px;
+  display: flex; align-items: center; transition: color 0.12s;
+  flex-shrink: 0;
+}
+.sidebar-collapse-btn:hover { color: var(--text-1); }
+.sidebar-expand-btn {
+  position: fixed; left: 0; top: 50%; transform: translateY(-50%);
+  background: var(--bg-surface); border: 1px solid var(--border-mid);
+  border-left: none; border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--text-2); cursor: pointer; padding: 10px 6px;
+  display: flex; align-items: center; z-index: 50;
+  transition: color 0.12s;
+}
+.sidebar-expand-btn:hover { color: var(--blue-bright); }
+
+/* Category grid */
+.category-grid { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 4px; }
+.cat-pill {
+  padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;
+  border: 1px solid var(--border-mid); background: var(--bg-surface);
+  color: var(--text-2); cursor: pointer; transition: all 0.12s; user-select: none;
+}
+.cat-pill:hover { border-color: var(--border-blue); color: var(--text-1); }
+.cat-pill.selected { background: var(--blue-dim); border-color: var(--blue); color: var(--blue-bright); font-weight: 600; }
+
+/* Cost summary grid */
+.cost-summary-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
+
+/* Cost filter row */
+.cost-filter-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
+.cost-model-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+/* Session name field */
+#session-name { font-family: var(--font-ui); }
+
+/* Parallel eval progress */
+.eval-live-badge {
+  font-size: 10px; font-weight: 600; color: var(--teal);
+  background: var(--teal-dim); border: 1px solid rgba(45,212,191,0.3);
+  border-radius: 4px; padding: 2px 7px; letter-spacing: 0.3px;
+  animation: pulse-dot 1.2s infinite;
+}
+.eval-progress-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 0; border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.ep-icon { font-size: 14px; width: 18px; flex-shrink: 0; }
+.ep-name { color: var(--text-1); font-weight: 500; min-width: 180px; }
+.ep-status { color: var(--text-2); font-family: var(--font-mono); font-size: 11px; }
+
+/* CURL import banner */
+.curl-import-banner {
+  background: var(--bg-card); border: 1px solid var(--border-mid);
+  border-radius: var(--radius-lg); padding: 16px 18px; margin-bottom: 14px;
+}
+.curl-import-row { margin-top: 10px; }
+
+/* Live session name */
+#live-session-name { color: var(--blue-bright); font-family: var(--font-mono); }
+
+/* Azure Foundry Claude pill */
+.cfg-pill.azure_claude { background: rgba(45,212,191,0.1); color: var(--teal); border: 1px solid rgba(45,212,191,0.3); }
