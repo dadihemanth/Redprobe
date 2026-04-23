@@ -1,8 +1,12 @@
-// model-client.js v5 — Azure Foundry Claude + CURL parser + multi-provider
+// model-client.js v6 — Azure Foundry Claude + CURL parser + multi-provider + AWS Bedrock SigV4 + prompt caching + assistant prefill
 
 const SEC = {
   AZURE_HOST_RE: /^https:\/\/[a-zA-Z0-9][a-zA-Z0-9\-]{0,62}\.(openai\.azure\.com|cognitiveservices\.azure\.com|services\.ai\.azure\.com)(\/.*)?$/,
   AZURE_FOUNDRY_CLAUDE_RE: /^https:\/\/[a-zA-Z0-9][a-zA-Z0-9\-]{0,120}\.services\.ai\.azure\.com(\/.*)?$/,
+  BEDROCK_HOST_RE: /^https:\/\/bedrock-runtime\.[a-z0-9\-]{1,40}\.amazonaws\.com(\/.*)?$/,
+  AWS_REGION_RE: /^[a-z]{2}-[a-z]+-[0-9]+$/,
+  AWS_AK_RE: /^[A-Z0-9]{16,128}$/,
+  BEDROCK_MODEL_RE: /^[a-zA-Z0-9][\w\-\.\/:]{0,511}$/,
   MODEL_RE: /^[a-zA-Z0-9][\w\-\.\/]{0,126}$/,
   VERSION_RE: /^[0-9]{4}-[0-9]{2}-[0-9]{2}(-preview)?$/,
 
@@ -14,8 +18,12 @@ const SEC = {
     if (provider === 'claude')         return url.startsWith('https://api.anthropic.com');
     if (provider === 'openai')         return url.startsWith('https://api.openai.com');
     if (provider === 'huggingface')    return /^https:\/\/(api-inference\.huggingface\.co|[a-zA-Z0-9\-]+\.(endpoints\.huggingface\.cloud|hf\.space))(\/.*)?$/.test(url);
+    if (provider === 'bedrock')        return this.BEDROCK_HOST_RE.test(url);
     return false;
   },
+  validateRegion(r) { return typeof r === 'string' && this.AWS_REGION_RE.test(r) && r.length < 40; },
+  validateAccessKey(k) { return typeof k === 'string' && this.AWS_AK_RE.test(k); },
+  validateBedrockModel(m) { return typeof m === 'string' && this.BEDROCK_MODEL_RE.test(m); },
   validateModel(name) { return typeof name === 'string' && this.MODEL_RE.test(name) && name.length < 128; },
   validateApiVersion(v) { return !v || this.VERSION_RE.test(v); },
   sanitize(s, maxLen = 32000) {
@@ -35,21 +43,93 @@ const RateLimit = {
   }
 };
 
+// ── AWS SigV4 signing (browser Web Crypto) ───────────────────────────────────
+const AwsSigV4 = {
+  _te: new TextEncoder(),
+  async _sha256Hex(str) {
+    const h = await crypto.subtle.digest('SHA-256', this._te.encode(str));
+    return Array.from(new Uint8Array(h)).map(b => b.toString(16).padStart(2, '0')).join('');
+  },
+  async _hmac(key, data) {
+    const keyBytes = typeof key === 'string' ? this._te.encode(key) : key;
+    const cryptoKey = await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const sig = await crypto.subtle.sign('HMAC', cryptoKey, this._te.encode(data));
+    return new Uint8Array(sig);
+  },
+  async _deriveKey(secret, dateStamp, region, service) {
+    const kDate    = await this._hmac('AWS4' + secret, dateStamp);
+    const kRegion  = await this._hmac(kDate, region);
+    const kService = await this._hmac(kRegion, service);
+    return await this._hmac(kService, 'aws4_request');
+  },
+  _hex(bytes) { return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(''); },
+  async signHeaders({ method, url, body, region, service, accessKeyId, secretKey, sessionToken }) {
+    const u = new URL(url);
+    const host = u.host;
+    // Canonical URI: URL-encode each segment but keep slashes
+    const canonicalUri = u.pathname
+      .split('/')
+      .map(seg => encodeURIComponent(seg).replace(/%2F/gi, '/'))
+      .join('/') || '/';
+    const canonicalQuery = '';
+    const now = new Date();
+    const amzDate   = now.toISOString().replace(/[:\-]|\.\d{3}/g, '');
+    const dateStamp = amzDate.substring(0, 8);
+    const payloadHash = await this._sha256Hex(body || '');
+
+    const headers = {
+      'host': host,
+      'x-amz-date': amzDate,
+      'content-type': 'application/json'
+    };
+    if (sessionToken) headers['x-amz-security-token'] = sessionToken;
+
+    const sortedKeys = Object.keys(headers).sort();
+    const canonicalHeaders = sortedKeys.map(k => `${k}:${String(headers[k]).trim()}`).join('\n') + '\n';
+    const signedHeaders = sortedKeys.join(';');
+
+    const canonicalRequest = [method, canonicalUri, canonicalQuery, canonicalHeaders, signedHeaders, payloadHash].join('\n');
+    const crHash = await this._sha256Hex(canonicalRequest);
+    const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+    const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, crHash].join('\n');
+    const signingKey = await this._deriveKey(secretKey, dateStamp, region, service);
+    const sig = this._hex(await this._hmac(signingKey, stringToSign));
+
+    return {
+      ...headers,
+      'Authorization': `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${sig}`
+    };
+  }
+};
+
 class ModelClient {
   static async call(cfg, msgs, opts = {}) {
     if (!cfg || !cfg.provider) throw new Error('ModelClient: provider required');
-    if (!cfg.key) throw new Error('ModelClient: API key required');
+    // Bedrock uses accessKeyId + secretKey, not `key`
+    if (cfg.provider !== 'bedrock' && !cfg.key) throw new Error('ModelClient: API key required');
     const maxTokens   = Math.min(Number(opts.maxTokens || 1000), 4096);
     const temperature = Math.min(Math.max(Number(opts.temperature || 0.7), 0), 2);
     const safeMsgs    = Array.isArray(msgs) ? msgs.map(m => ({ role: SEC.sanitizeRole(m.role), content: SEC.sanitize(m.content, 16000) })) : [];
     const safeSystem  = opts.systemPrompt ? SEC.sanitize(opts.systemPrompt, 8000) : undefined;
+    // Cost-saving: mark the system prompt as cacheable on Anthropic-family
+    // providers (Anthropic, Bedrock Claude, Azure Foundry Claude). Only
+    // worthwhile when the system prompt is substantial AND will be reused
+    // across many calls — callers opt in explicitly.
+    const cacheSystem = !!opts.cacheSystem && !!safeSystem && safeSystem.length >= 400;
+    // Assistant prefill: for Anthropic-family models, a trailing assistant
+    // message (even a partial one) is continued by the model. This is an
+    // extremely effective final-turn attack vector. Callers pass the seed
+    // string (e.g. "Sure, here are the steps:\n\n1.") and the model continues
+    // from it. We return prefix+continuation so the full response is visible.
+    const assistantPrefill = opts.assistantPrefill ? SEC.sanitize(opts.assistantPrefill, 2000) : '';
 
     switch (cfg.provider) {
       case 'azure':        return ModelClient._azure(cfg, safeMsgs, safeSystem, maxTokens, temperature);
-      case 'azure_claude': return ModelClient._azureClaude(cfg, safeMsgs, safeSystem, maxTokens, temperature);
-      case 'claude':       return ModelClient._claude(cfg, safeMsgs, safeSystem, maxTokens, temperature);
+      case 'azure_claude': return ModelClient._azureClaude(cfg, safeMsgs, safeSystem, maxTokens, temperature, cacheSystem, assistantPrefill);
+      case 'claude':       return ModelClient._claude(cfg, safeMsgs, safeSystem, maxTokens, temperature, cacheSystem, assistantPrefill);
       case 'openai':       return ModelClient._openai(cfg, safeMsgs, safeSystem, maxTokens, temperature);
       case 'huggingface':  return ModelClient._huggingface(cfg, safeMsgs, safeSystem, maxTokens, temperature);
+      case 'bedrock':      return ModelClient._bedrock(cfg, safeMsgs, safeSystem, maxTokens, temperature, cacheSystem, assistantPrefill);
       default: throw new Error(`Unknown provider: ${SEC.sanitize(cfg.provider, 20)}`);
     }
   }
@@ -71,8 +151,24 @@ class ModelClient {
     const d = await res.json(); return d.choices?.[0]?.message?.content || '';
   }
 
+  // Anthropic prompt-caching helper — wraps a string system prompt into the
+  // structured content-block format required for `cache_control`.
+  static _claudeSystemBlock(system, cacheSystem) {
+    if (!system) return undefined;
+    if (!cacheSystem) return system;
+    return [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
+  }
+
+  // Build the messages array for Anthropic endpoints, appending an assistant
+  // prefill as a trailing assistant message. The model continues from it.
+  static _claudeMessages(msgs, assistantPrefill) {
+    const out = msgs.filter(m => m.role !== 'system');
+    if (assistantPrefill) out.push({ role: 'assistant', content: assistantPrefill });
+    return out;
+  }
+
   // Azure AI Foundry with Claude models (uses Anthropic /messages format)
-  static async _azureClaude(cfg, msgs, system, maxTokens, temp) {
+  static async _azureClaude(cfg, msgs, system, maxTokens, temp, cacheSystem, assistantPrefill) {
     const ep    = (cfg.endpoint||'').replace(/\/$/,'');
     const model = SEC.sanitize(cfg.model||'claude-sonnet-4-6', 128);
     if (!SEC.validateEndpoint('azure_claude', ep)) throw new Error('Invalid Azure Foundry Claude endpoint. Must be *.services.ai.azure.com');
@@ -83,33 +179,37 @@ class ModelClient {
       model,
       max_tokens: maxTokens,
       temperature: temp,
-      messages: msgs.filter(m => m.role !== 'system')
+      messages: ModelClient._claudeMessages(msgs, assistantPrefill)
     };
-    if (system) body.system = system;
+    const sysBlock = ModelClient._claudeSystemBlock(system, cacheSystem);
+    if (sysBlock !== undefined) body.system = sysBlock;
 
     // Azure Foundry Claude endpoint: /anthropic/v1/messages
     const url = `${ep}/anthropic/v1/messages`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json', 'x-api-key':cfg.key, 'anthropic-version':'2023-06-01' },
-      body: JSON.stringify(body)
-    });
+    const headers = { 'Content-Type':'application/json', 'x-api-key':cfg.key, 'anthropic-version':'2023-06-01' };
+    if (cacheSystem) headers['anthropic-beta'] = 'prompt-caching-2024-07-31';
+    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
     if (!res.ok) { const e = await res.text().catch(()=>''); throw new Error(`Azure Foundry Claude ${res.status}: ${SEC.sanitize(e,250)}`); }
-    const d = await res.json(); return d.content?.[0]?.text || '';
+    const d = await res.json();
+    const text = d.content?.[0]?.text || '';
+    // Return prefix+continuation so the full response (including our seed) is visible in logs/records
+    return assistantPrefill ? (assistantPrefill + text) : text;
   }
 
-  static async _claude(cfg, msgs, system, maxTokens, temp) {
+  static async _claude(cfg, msgs, system, maxTokens, temp, cacheSystem, assistantPrefill) {
     const model = SEC.sanitize(cfg.model||'claude-sonnet-4-20250514', 128);
     if (!SEC.validateModel(model)) throw new Error('Invalid Claude model name');
     RateLimit.check('claude');
-    const body = { model, max_tokens:maxTokens, temperature:temp, messages:msgs.filter(m=>m.role!=='system') };
-    if (system) body.system = system;
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method:'POST', headers:{ 'Content-Type':'application/json','x-api-key':cfg.key,'anthropic-version':'2023-06-01' },
-      body: JSON.stringify(body)
-    });
+    const body = { model, max_tokens:maxTokens, temperature:temp, messages: ModelClient._claudeMessages(msgs, assistantPrefill) };
+    const sysBlock = ModelClient._claudeSystemBlock(system, cacheSystem);
+    if (sysBlock !== undefined) body.system = sysBlock;
+    const headers = { 'Content-Type':'application/json','x-api-key':cfg.key,'anthropic-version':'2023-06-01' };
+    if (cacheSystem) headers['anthropic-beta'] = 'prompt-caching-2024-07-31';
+    const res = await fetch('https://api.anthropic.com/v1/messages', { method:'POST', headers, body: JSON.stringify(body) });
     if (!res.ok) { const e = await res.text().catch(()=>''); throw new Error(`Claude ${res.status}: ${SEC.sanitize(e,250)}`); }
-    const d = await res.json(); return d.content?.[0]?.text || '';
+    const d = await res.json();
+    const text = d.content?.[0]?.text || '';
+    return assistantPrefill ? (assistantPrefill + text) : text;
   }
 
   static async _openai(cfg, msgs, system, maxTokens, temp) {
@@ -142,8 +242,150 @@ class ModelClient {
     const d = await res.json(); return d.choices?.[0]?.message?.content || d.generated_text || '';
   }
 
+  // AWS Bedrock — uses SigV4 signed requests against bedrock-runtime.{region}.amazonaws.com
+  // cfg: { provider:'bedrock', region, accessKeyId, secretAccessKey, sessionToken?, model (inference profile ARN or modelId), family? }
+  // Supports Anthropic Claude (default family) and auto-detects by model ID prefix.
+  static async _bedrock(cfg, msgs, system, maxTokens, temp, cacheSystem, assistantPrefill) {
+    const region = SEC.sanitize(cfg.region || '', 40);
+    const ak     = SEC.sanitize(cfg.accessKeyId || '', 128);
+    const sk     = cfg.secretAccessKey || '';
+    const stok   = cfg.sessionToken ? SEC.sanitize(cfg.sessionToken, 4096) : '';
+    const model  = SEC.sanitize(cfg.model || '', 512);
+
+    if (!SEC.validateRegion(region))       throw new Error('Bedrock: invalid region (e.g. us-east-1)');
+    if (!SEC.validateAccessKey(ak))        throw new Error('Bedrock: invalid access key ID format');
+    if (!sk || typeof sk !== 'string' || sk.length < 8) throw new Error('Bedrock: secret access key required');
+    if (!model)                            throw new Error('Bedrock: model ID or inference profile ARN required');
+    if (!SEC.validateBedrockModel(model))  throw new Error('Bedrock: invalid model/ARN format');
+
+    RateLimit.check('bedrock');
+
+    // Determine family: Anthropic (default) vs other
+    const lower = model.toLowerCase();
+    const isAnthropic = lower.includes('anthropic') || lower.includes('claude');
+    const isMeta      = lower.includes('meta.llama') || lower.includes('llama');
+    const isMistral   = lower.includes('mistral') || lower.includes('mixtral');
+    const isAmazon    = lower.includes('amazon.') || lower.includes('titan') || lower.includes('nova');
+
+    let body;
+    if (isAnthropic) {
+      body = {
+        anthropic_version: 'bedrock-2023-05-31',
+        max_tokens: maxTokens,
+        temperature: temp,
+        messages: ModelClient._claudeMessages(msgs, assistantPrefill)
+      };
+      const sysBlock = ModelClient._claudeSystemBlock(system, cacheSystem);
+      if (sysBlock !== undefined) body.system = sysBlock;
+    } else if (isMeta) {
+      // Llama chat: single prompt string
+      const prompt = (system ? `<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n${system}<|eot_id|>` : '<|begin_of_text|>') +
+        msgs.map(m => `<|start_header_id|>${m.role}<|end_header_id|>\n\n${m.content}<|eot_id|>`).join('') +
+        `<|start_header_id|>assistant<|end_header_id|>\n\n`;
+      body = { prompt, max_gen_len: maxTokens, temperature: temp };
+    } else if (isMistral) {
+      const prompt = (system ? `[INST] <<SYS>>\n${system}\n<</SYS>>\n\n` : '[INST] ') +
+        msgs.map(m => m.role === 'user' ? `${m.content} [/INST]` : ` ${m.content} [INST]`).join(' ');
+      body = { prompt, max_tokens: maxTokens, temperature: temp };
+    } else if (isAmazon) {
+      // Amazon Titan / Nova — uses messages-v1 format
+      body = {
+        schemaVersion: 'messages-v1',
+        messages: msgs.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: [{ text: m.content }] })),
+        inferenceConfig: { maxTokens, temperature: temp }
+      };
+      if (system) body.system = [{ text: system }];
+    } else {
+      // Fallback to Anthropic format — most common
+      body = {
+        anthropic_version: 'bedrock-2023-05-31',
+        max_tokens: maxTokens,
+        temperature: temp,
+        messages: ModelClient._claudeMessages(msgs, assistantPrefill)
+      };
+      const sysBlock = ModelClient._claudeSystemBlock(system, cacheSystem);
+      if (sysBlock !== undefined) body.system = sysBlock;
+    }
+
+    const bodyStr = JSON.stringify(body);
+    // Inference-profile ARNs contain slashes/colons that must be URL-encoded as a single path segment
+    const encodedModel = encodeURIComponent(model);
+    const url = `https://bedrock-runtime.${region}.amazonaws.com/model/${encodedModel}/invoke`;
+
+    const headers = await AwsSigV4.signHeaders({
+      method: 'POST',
+      url,
+      body: bodyStr,
+      region,
+      service: 'bedrock',
+      accessKeyId: ak,
+      secretKey: sk,
+      sessionToken: stok
+    });
+
+    const res = await fetch(url, { method: 'POST', headers, body: bodyStr });
+    if (!res.ok) {
+      const e = await res.text().catch(() => '');
+      throw new Error(`Bedrock ${res.status}: ${SEC.sanitize(e, 300)}`);
+    }
+    const d = await res.json();
+
+    // Extract text from response by family. For Anthropic prefilled calls,
+    // return prefix + continuation so the full response is visible.
+    const prefixAnthropic = (text) => (assistantPrefill ? (assistantPrefill + (text || '')) : (text || ''));
+    if (isAnthropic) return prefixAnthropic(d.content?.[0]?.text || d.completion);
+    if (isMeta)      return d.generation || '';
+    if (isMistral)   return d.outputs?.[0]?.text || d.choices?.[0]?.message?.content || '';
+    if (isAmazon)    return d.output?.message?.content?.[0]?.text || d.results?.[0]?.outputText || '';
+    return prefixAnthropic(d.content?.[0]?.text || d.completion || d.generation || d.outputText);
+  }
+
   static async test(cfg) {
     return ModelClient.call(cfg, [{ role:'user', content:'Hi' }], { maxTokens:5 });
+  }
+
+  // Fetch available model deployments from an Azure AI Foundry endpoint.
+  // Returns an array of model ID strings sorted alphabetically.
+  static async fetchAzureFoundryModels(endpoint, apiKey) {
+    if (!endpoint || !apiKey) throw new Error('Endpoint and API key are required');
+    const ep = endpoint.replace(/\/$/,'');
+    if (!SEC.validateEndpoint('azure_claude', ep)) throw new Error('Invalid endpoint: must be *.services.ai.azure.com');
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'Authorization': `Bearer ${apiKey}`,
+      'anthropic-version': '2023-06-01',
+    };
+
+    // Azure AI Foundry exposes two possible model list endpoints — try both
+    const candidates = [
+      `${ep}/models?api-version=2024-05-01-preview`,
+      `${ep}/openai/deployments?api-version=2024-05-01-preview`,
+      `${ep}/models`,
+    ];
+
+    let lastError = null;
+    for (const url of candidates) {
+      try {
+        const res = await fetch(url, { method: 'GET', headers });
+        if (!res.ok) {
+          lastError = `HTTP ${res.status} from ${url}`;
+          continue;
+        }
+        const data = await res.json();
+        // Normalise: Azure AI Inference returns { data: [{id},...] } or [{id},...]
+        const items = Array.isArray(data) ? data : (data.data || data.value || []);
+        const ids = items
+          .map(m => m.id || m.model || m.name || '')
+          .filter(id => id && typeof id === 'string')
+          .sort();
+        if (ids.length > 0) return ids;
+      } catch (e) {
+        lastError = e.message;
+      }
+    }
+    throw new Error(lastError || 'No models found at any endpoint path');
   }
 }
 
@@ -256,3 +498,4 @@ window.ModelClient = ModelClient;
 window.SEC         = SEC;
 window.YAML        = YAML;
 window.CURLParser  = CURLParser;
+window.AwsSigV4    = AwsSigV4;

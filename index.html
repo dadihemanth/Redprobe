@@ -13,10 +13,23 @@
                        https://api.openai.com
                        https://api-inference.huggingface.co
                        https://*.endpoints.huggingface.cloud
-                       https://*.hf.space;
+                       https://*.hf.space
+                       https://bedrock-runtime.us-east-1.amazonaws.com
+                       https://bedrock-runtime.us-east-2.amazonaws.com
+                       https://bedrock-runtime.us-west-2.amazonaws.com
+                       https://bedrock-runtime.eu-west-1.amazonaws.com
+                       https://bedrock-runtime.eu-west-3.amazonaws.com
+                       https://bedrock-runtime.eu-central-1.amazonaws.com
+                       https://bedrock-runtime.ap-south-1.amazonaws.com
+                       https://bedrock-runtime.ap-southeast-1.amazonaws.com
+                       https://bedrock-runtime.ap-southeast-2.amazonaws.com
+                       https://bedrock-runtime.ap-northeast-1.amazonaws.com
+                       https://bedrock-runtime.ap-northeast-2.amazonaws.com
+                       https://bedrock-runtime.ca-central-1.amazonaws.com
+                       https://bedrock-runtime.sa-east-1.amazonaws.com;
            style-src 'self' 'unsafe-inline';
            img-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';">
-<title>RedProbe v5 — AI Security</title>
+<title>RedProbe v6 — AI Security</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -31,7 +44,7 @@
         </svg>
       </div>
       <span class="logo-text sidebar-text">RedProbe</span>
-      <span class="logo-ver sidebar-text">v5</span>
+      <span class="logo-ver sidebar-text">v6</span>
       <button class="sidebar-collapse-btn" id="sidebar-collapse" title="Collapse sidebar">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
       </button>
@@ -102,6 +115,7 @@
             <button class="ptab" data-provider="openai">OpenAI</button>
             <button class="ptab" data-provider="claude">Claude API</button>
             <button class="ptab" data-provider="huggingface">HuggingFace</button>
+            <button class="ptab" data-provider="bedrock">AWS Bedrock</button>
           </div>
           <div class="provider-fields" id="target-fields-azure">
             <div class="field-group"><label>Endpoint URL</label><input type="text" id="target-endpoint" placeholder="https://your-resource.openai.azure.com/" autocomplete="off" spellcheck="false"/></div>
@@ -119,13 +133,17 @@
           <div class="provider-fields" id="target-fields-azure_claude" style="display:none">
             <div class="field-group"><label>Azure Foundry Endpoint</label><input type="text" id="target-az-claude-endpoint" placeholder="https://your-resource.services.ai.azure.com" autocomplete="off" spellcheck="false"/><span class="field-hint">Must be *.services.ai.azure.com — the Anthropic endpoint on Azure Foundry</span></div>
             <div class="field-group"><label>Model</label>
-              <select id="target-az-claude-model">
-                <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
-                <option value="claude-opus-4-6">Claude Opus 4.6</option>
-                <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
-                <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-                <option value="__custom__">Custom…</option>
-              </select>
+              <div style="display:flex;gap:6px;align-items:center">
+                <select id="target-az-claude-model" style="flex:1">
+                  <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+                  <option value="claude-opus-4-6">Claude Opus 4.6</option>
+                  <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
+                  <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                  <option value="__custom__">Custom…</option>
+                </select>
+                <button class="btn-xs" id="btn-fetch-target-models" title="Fetch deployed models from endpoint">Fetch</button>
+              </div>
+              <span class="field-hint" id="fetch-target-status"></span>
             </div>
             <div class="field-group" id="target-az-claude-custom-wrap" style="display:none"><input type="text" id="target-az-claude-model-custom" placeholder="claude-sonnet-4-6" autocomplete="off"/></div>
             <div class="field-group"><label>CURL Import (optional)</label>
@@ -153,6 +171,38 @@
             <div class="field-group" id="target-hf-custom-wrap" style="display:none"><input type="text" id="target-model-hf-custom" placeholder="org/model-name" autocomplete="off"/></div>
             <div class="field-group"><label>Custom Endpoint (optional)</label><input type="text" id="target-hf-endpoint" placeholder="https://your.endpoints.huggingface.cloud" autocomplete="off"/></div>
           </div>
+          <div class="provider-fields" id="target-fields-bedrock" style="display:none">
+            <div class="field-group"><label>AWS Region</label>
+              <select id="target-bedrock-region">
+                <option value="us-east-1">us-east-1 (N. Virginia)</option>
+                <option value="us-east-2">us-east-2 (Ohio)</option>
+                <option value="us-west-2">us-west-2 (Oregon)</option>
+                <option value="eu-west-1">eu-west-1 (Ireland)</option>
+                <option value="eu-west-3">eu-west-3 (Paris)</option>
+                <option value="eu-central-1">eu-central-1 (Frankfurt)</option>
+                <option value="ap-south-1">ap-south-1 (Mumbai)</option>
+                <option value="ap-southeast-1">ap-southeast-1 (Singapore)</option>
+                <option value="ap-southeast-2">ap-southeast-2 (Sydney)</option>
+                <option value="ap-northeast-1">ap-northeast-1 (Tokyo)</option>
+                <option value="ap-northeast-2">ap-northeast-2 (Seoul)</option>
+                <option value="ca-central-1">ca-central-1 (Canada)</option>
+                <option value="sa-east-1">sa-east-1 (São Paulo)</option>
+              </select>
+            </div>
+            <div class="field-group"><label>Inference Profile ARN or Model ID</label>
+              <input type="text" id="target-bedrock-model" placeholder="arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-sonnet-4-20250514-v1:0" autocomplete="off" spellcheck="false"/>
+              <span class="field-hint">Paste a full inference-profile ARN (recommended for cross-region) or a modelId like <code>anthropic.claude-3-5-sonnet-20241022-v2:0</code>. Supports Anthropic, Meta Llama, Mistral, and Amazon Titan/Nova families (auto-detected).</span>
+            </div>
+            <div class="field-group"><label>AWS Access Key ID</label>
+              <input type="text" id="target-bedrock-ak" placeholder="AKIA…" autocomplete="off" spellcheck="false"/>
+            </div>
+            <div class="field-group"><label>AWS Secret Access Key</label>
+              <div class="key-wrap"><input type="password" id="target-bedrock-sk" placeholder="••••••••••••••••••••••••••••••••••••••••" autocomplete="new-password"/><button class="eye-btn" data-for="target-bedrock-sk">&#9679;</button></div>
+            </div>
+            <div class="field-group"><label>Session Token (optional — for STS / temporary credentials)</label>
+              <div class="key-wrap"><input type="password" id="target-bedrock-session" placeholder="Leave blank for long-lived IAM keys" autocomplete="new-password"/><button class="eye-btn" data-for="target-bedrock-session">&#9679;</button></div>
+            </div>
+          </div>
           <div class="field-group"><label id="target-key-label">Azure API Key</label>
             <div class="key-wrap"><input type="password" id="target-key" placeholder="••••••••••••••••••" autocomplete="new-password"/><button class="eye-btn" data-for="target-key">&#9679;</button></div>
           </div>
@@ -177,6 +227,7 @@
             <button class="ptab" data-provider="openai">OpenAI</button>
             <button class="ptab" data-provider="claude">Claude API</button>
             <button class="ptab" data-provider="huggingface">HuggingFace</button>
+            <button class="ptab" data-provider="bedrock">AWS Bedrock</button>
           </div>
           <div class="provider-fields" id="eval-fields-azure">
             <div class="field-group"><label>Endpoint URL</label><input type="text" id="eval-endpoint" placeholder="https://your-eval-resource.openai.azure.com/" autocomplete="off" spellcheck="false"/><span class="field-hint">Can be same or different resource</span></div>
@@ -188,7 +239,11 @@
           <div class="provider-fields" id="eval-fields-azure_claude" style="display:none">
             <div class="field-group"><label>Azure Foundry Endpoint</label><input type="text" id="eval-az-claude-endpoint" placeholder="https://your-resource.services.ai.azure.com" autocomplete="off"/></div>
             <div class="field-group"><label>Model</label>
-              <select id="eval-az-claude-model"><option value="claude-sonnet-4-6">Claude Sonnet 4.6</option><option value="claude-opus-4-6">Claude Opus 4.6</option><option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option><option value="__custom__">Custom…</option></select>
+              <div style="display:flex;gap:6px;align-items:center">
+                <select id="eval-az-claude-model" style="flex:1"><option value="claude-sonnet-4-6">Claude Sonnet 4.6</option><option value="claude-opus-4-6">Claude Opus 4.6</option><option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option><option value="__custom__">Custom…</option></select>
+                <button class="btn-xs" id="btn-fetch-eval-models" title="Fetch deployed models from endpoint">Fetch</button>
+              </div>
+              <span class="field-hint" id="fetch-eval-status"></span>
             </div>
             <div class="field-group" id="eval-az-claude-custom-wrap" style="display:none"><input type="text" id="eval-az-claude-model-custom" placeholder="claude-sonnet-4-6" autocomplete="off"/></div>
           </div>
@@ -204,6 +259,35 @@
             <div class="field-group"><label>Model ID</label><select id="eval-model-hf"><option value="meta-llama/Meta-Llama-3.1-70B-Instruct">Llama 3.1 70B</option><option value="Qwen/Qwen2.5-72B-Instruct">Qwen 2.5 72B</option><option value="__custom__">Custom…</option></select></div>
             <div class="field-group" id="eval-hf-custom-wrap" style="display:none"><input type="text" id="eval-model-hf-custom" placeholder="org/model-name" autocomplete="off"/></div>
             <div class="field-group"><label>Custom Endpoint (optional)</label><input type="text" id="eval-hf-endpoint" placeholder="https://your.endpoints.huggingface.cloud" autocomplete="off"/></div>
+          </div>
+          <div class="provider-fields" id="eval-fields-bedrock" style="display:none">
+            <div class="field-group"><label>AWS Region</label>
+              <select id="eval-bedrock-region">
+                <option value="us-east-1">us-east-1 (N. Virginia)</option>
+                <option value="us-east-2">us-east-2 (Ohio)</option>
+                <option value="us-west-2">us-west-2 (Oregon)</option>
+                <option value="eu-west-1">eu-west-1 (Ireland)</option>
+                <option value="eu-central-1">eu-central-1 (Frankfurt)</option>
+                <option value="ap-south-1">ap-south-1 (Mumbai)</option>
+                <option value="ap-southeast-1">ap-southeast-1 (Singapore)</option>
+                <option value="ap-southeast-2">ap-southeast-2 (Sydney)</option>
+                <option value="ap-northeast-1">ap-northeast-1 (Tokyo)</option>
+                <option value="ca-central-1">ca-central-1 (Canada)</option>
+                <option value="sa-east-1">sa-east-1 (São Paulo)</option>
+              </select>
+            </div>
+            <div class="field-group"><label>Inference Profile ARN or Model ID</label>
+              <input type="text" id="eval-bedrock-model" placeholder="arn:aws:bedrock:…:inference-profile/us.anthropic.claude-… or anthropic.claude-3-5-sonnet-20241022-v2:0" autocomplete="off" spellcheck="false"/>
+            </div>
+            <div class="field-group"><label>AWS Access Key ID</label>
+              <input type="text" id="eval-bedrock-ak" placeholder="AKIA…" autocomplete="off" spellcheck="false"/>
+            </div>
+            <div class="field-group"><label>AWS Secret Access Key</label>
+              <div class="key-wrap"><input type="password" id="eval-bedrock-sk" placeholder="••••••••••••••••••••••••••••••••••••••••" autocomplete="new-password"/><button class="eye-btn" data-for="eval-bedrock-sk">&#9679;</button></div>
+            </div>
+            <div class="field-group"><label>Session Token (optional)</label>
+              <div class="key-wrap"><input type="password" id="eval-bedrock-session" placeholder="Leave blank for long-lived IAM keys" autocomplete="new-password"/><button class="eye-btn" data-for="eval-bedrock-session">&#9679;</button></div>
+            </div>
           </div>
           <div class="field-group"><label id="eval-key-label">Azure API Key</label>
             <div class="key-wrap"><input type="password" id="eval-key" placeholder="••••••••••••••••••" autocomplete="new-password"/><button class="eye-btn" data-for="eval-key">&#9679;</button></div>
@@ -221,6 +305,7 @@
             <button class="ptab" data-provider="openai">OpenAI</button>
             <button class="ptab" data-provider="azure">Azure OpenAI</button>
             <button class="ptab" data-provider="huggingface">HuggingFace</button>
+            <button class="ptab" data-provider="bedrock">AWS Bedrock</button>
           </div>
           <div class="provider-fields" id="redteam-fields-claude">
             <div class="field-group"><label>Model</label>
@@ -231,7 +316,11 @@
           <div class="provider-fields" id="redteam-fields-azure_claude" style="display:none">
             <div class="field-group"><label>Azure Foundry Endpoint</label><input type="text" id="redteam-az-claude-endpoint" placeholder="https://your-resource.services.ai.azure.com" autocomplete="off"/></div>
             <div class="field-group"><label>Model</label>
-              <select id="redteam-az-claude-model"><option value="claude-sonnet-4-6">Claude Sonnet 4.6</option><option value="claude-opus-4-6">Claude Opus 4.6</option><option value="__custom__">Custom…</option></select>
+              <div style="display:flex;gap:6px;align-items:center">
+                <select id="redteam-az-claude-model" style="flex:1"><option value="claude-sonnet-4-6">Claude Sonnet 4.6</option><option value="claude-opus-4-6">Claude Opus 4.6</option><option value="__custom__">Custom…</option></select>
+                <button class="btn-xs" id="btn-fetch-redteam-models" title="Fetch deployed models from endpoint">Fetch</button>
+              </div>
+              <span class="field-hint" id="fetch-redteam-status"></span>
             </div>
             <div class="field-group" id="redteam-az-claude-custom-wrap" style="display:none"><input type="text" id="redteam-az-claude-model-custom" placeholder="claude-sonnet-4-6" autocomplete="off"/></div>
           </div>
@@ -250,6 +339,36 @@
             <div class="field-group"><label>Model ID</label><select id="redteam-model-hf"><option value="meta-llama/Meta-Llama-3.1-70B-Instruct">Llama 3.1 70B</option><option value="mistralai/Mixtral-8x7B-Instruct-v0.1">Mixtral 8x7B</option><option value="Qwen/Qwen2.5-72B-Instruct">Qwen 2.5 72B</option><option value="__custom__">Custom…</option></select></div>
             <div class="field-group" id="redteam-hf-custom-wrap" style="display:none"><input type="text" id="redteam-model-hf-custom" placeholder="org/model-name" autocomplete="off"/></div>
             <div class="field-group"><label>Custom Endpoint (optional)</label><input type="text" id="redteam-hf-endpoint" placeholder="https://your.endpoints.huggingface.cloud" autocomplete="off"/></div>
+          </div>
+          <div class="provider-fields" id="redteam-fields-bedrock" style="display:none">
+            <div class="field-group"><label>AWS Region</label>
+              <select id="redteam-bedrock-region">
+                <option value="us-east-1">us-east-1 (N. Virginia)</option>
+                <option value="us-east-2">us-east-2 (Ohio)</option>
+                <option value="us-west-2">us-west-2 (Oregon)</option>
+                <option value="eu-west-1">eu-west-1 (Ireland)</option>
+                <option value="eu-central-1">eu-central-1 (Frankfurt)</option>
+                <option value="ap-south-1">ap-south-1 (Mumbai)</option>
+                <option value="ap-southeast-1">ap-southeast-1 (Singapore)</option>
+                <option value="ap-southeast-2">ap-southeast-2 (Sydney)</option>
+                <option value="ap-northeast-1">ap-northeast-1 (Tokyo)</option>
+                <option value="ca-central-1">ca-central-1 (Canada)</option>
+                <option value="sa-east-1">sa-east-1 (São Paulo)</option>
+              </select>
+            </div>
+            <div class="field-group"><label>Inference Profile ARN or Model ID</label>
+              <input type="text" id="redteam-bedrock-model" placeholder="arn:aws:bedrock:…:inference-profile/us.anthropic.claude-… (recommended: a Claude model)" autocomplete="off" spellcheck="false"/>
+              <span class="field-hint">Recommended: a Claude Sonnet / Opus inference profile on Bedrock — they produce high-quality attack prompts without Azure's aggressive filter on generation.</span>
+            </div>
+            <div class="field-group"><label>AWS Access Key ID</label>
+              <input type="text" id="redteam-bedrock-ak" placeholder="AKIA…" autocomplete="off" spellcheck="false"/>
+            </div>
+            <div class="field-group"><label>AWS Secret Access Key</label>
+              <div class="key-wrap"><input type="password" id="redteam-bedrock-sk" placeholder="••••••••••••••••••••••••••••••••••••••••" autocomplete="new-password"/><button class="eye-btn" data-for="redteam-bedrock-sk">&#9679;</button></div>
+            </div>
+            <div class="field-group"><label>Session Token (optional)</label>
+              <div class="key-wrap"><input type="password" id="redteam-bedrock-session" placeholder="Leave blank for long-lived IAM keys" autocomplete="new-password"/><button class="eye-btn" data-for="redteam-bedrock-session">&#9679;</button></div>
+            </div>
           </div>
           <div class="field-group"><label id="redteam-key-label">Anthropic API Key</label>
             <div class="key-wrap"><input type="password" id="redteam-key" placeholder="sk-ant-••••••••••••••••" autocomplete="new-password"/><button class="eye-btn" data-for="redteam-key">&#9679;</button></div>
@@ -341,9 +460,26 @@
           </div>
           <div class="card-title" style="margin-top:14px">Intent Mode</div>
           <div class="radio-group">
-            <label class="radio-label"><input type="radio" name="intent-mode" value="auto" checked id="intent-auto"/><span>Auto-generate per technique</span><span class="badge badge-blue">AI crafted</span></label>
+            <label class="radio-label"><input type="radio" name="intent-mode" value="static" checked id="intent-static"/><span>Static intent</span><span class="badge badge-teal">Reproducible</span></label>
+            <label class="radio-label"><input type="radio" name="intent-mode" value="auto" id="intent-auto"/><span>Auto-generate per technique</span><span class="badge badge-blue">AI crafted</span></label>
+            <label class="radio-label"><input type="radio" name="intent-mode" value="autotune" id="intent-autotune"/><span>Auto-tune (pilot + pick winner)</span><span class="badge badge-amber">Most effective</span></label>
             <label class="radio-label"><input type="radio" name="intent-mode" value="manual" id="intent-manual"/><span>Manual intent</span></label>
           </div>
+          <div id="autotune-settings" style="display:none;margin-top:10px;padding:10px;background:var(--bg-2);border-radius:6px">
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <span class="field-hint" style="color:var(--amber)">Auto-tune runs a short pilot per candidate intent and selects the most vulnerable framing for the full session.</span>
+            </div>
+            <div class="field-row-2" style="margin-top:10px">
+              <div class="field-group"><label>Pilot Turns <span class="field-val" id="autotune-pilot-turns-val">3</span></label><input type="range" min="2" max="6" value="3" id="autotune-pilot-turns"/></div>
+              <div class="field-group"><label>Candidates per Category <span class="field-val" id="autotune-candidates-val">3</span></label><input type="range" min="2" max="5" value="3" id="autotune-candidates"/></div>
+            </div>
+            <label class="radio-label" style="margin-top:4px">
+              <input type="checkbox" id="autotune-mutate" checked/>
+              <span>Also LLM-mutate one candidate per category</span>
+              <span class="badge badge-blue">Adds novel framing</span>
+            </label>
+          </div>
+          <div id="static-temp-hint" class="field-hint" style="color:var(--teal);margin-top:4px">&#x2193; Static mode: lower temperature (0.3) improves reproducibility</div>
           <div id="intent-manual-section" style="display:none;margin-top:10px">
             <div class="field-group"><textarea id="custom-intent" rows="3" placeholder="Describe what harmful content to elicit…"></textarea></div>
           </div>
@@ -359,6 +495,12 @@
             <span>Parallel evaluation after each technique</span>
             <span class="badge badge-blue">Recommended</span>
           </label>
+          <label class="radio-label" style="margin-top:4px">
+            <input type="checkbox" id="eval-prefilter-toggle"/>
+            <span>Cost-save: auto-classify clean refusals without judge LLM</span>
+            <span class="badge badge-amber">Off by default</span>
+          </label>
+          <span class="field-hint" style="display:block;margin-top:2px">When ON, responses that start with a canonical refusal phrase AND are short AND have no operational content are marked as <em>failed</em> locally, skipping the judge. Leave OFF if you want every record LLM-scored (more accurate).</span>
         </div>
       </div>
 
@@ -429,6 +571,11 @@
             <button class="log-filter" data-filter="response">Responses</button>
             <button class="log-filter" data-filter="system">System</button>
             <button class="log-filter" data-filter="break">Breaks</button>
+            <span style="display:inline-flex;gap:6px;margin-left:10px;border-left:1px solid var(--border);padding-left:10px">
+              <button class="log-filter" id="btn-download-log-txt"  title="Download full log as plain text">⭳ TXT</button>
+              <button class="log-filter" id="btn-download-log-json" title="Download full log as structured JSON">⭳ JSON</button>
+              <button class="log-filter" id="btn-copy-log"          title="Copy full log to clipboard">⎘ Copy</button>
+            </span>
           </div>
         </div>
         <div class="live-log" id="live-log"><div class="log-placeholder">Session log appears here…</div></div>
@@ -570,6 +717,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="techniques.js"></script>
+<script src="jailbreaks.js"></script>
 <script src="model-client.js"></script>
 <script src="attacker.js"></script>
 <script src="evaluator.js"></script>

@@ -1,4 +1,4 @@
-// app.js v5 — sidebar collapse, multi-category, session naming, parallel eval, costs
+// app.js v6 — adaptive routing, commitment tracking, payload injection, conversation-level eval, OWASP mapping, log downloads
 
 // ── Pricing tables ────────────────────────────────────────────────────────────
 const PRICING = {
@@ -72,7 +72,8 @@ document.querySelectorAll('.eye-btn').forEach(btn => {
 const KEY_LABELS = {
   azure:'Azure API Key', azure_claude:'Azure API Key (x-api-key)',
   openai:'OpenAI API Key (sk-…)', claude:'Anthropic API Key (sk-ant-…)',
-  huggingface:'HuggingFace Token (hf_…)'
+  huggingface:'HuggingFace Token (hf_…)',
+  bedrock:'(Bedrock uses AWS keys inside the Bedrock panel above)'
 };
 
 document.querySelectorAll('.provider-tabs').forEach(tabGroup => {
@@ -88,10 +89,14 @@ document.querySelectorAll('.provider-tabs').forEach(tabGroup => {
 });
 
 function switchProviderFields(role, provider) {
-  ['azure','azure_claude','openai','claude','huggingface'].forEach(p => {
+  ['azure','azure_claude','openai','claude','huggingface','bedrock'].forEach(p => {
     const el = $(`${role}-fields-${p}`); if(el) el.style.display = p===provider ? '' : 'none';
   });
   const lbl = $(`${role}-key-label`); if(lbl) lbl.textContent = KEY_LABELS[provider]||'API Key';
+  // Bedrock uses AWS keys inside its own panel — hide the shared single-key row.
+  const sharedKey = $(`${role}-key`);
+  const sharedKeyGroup = sharedKey ? sharedKey.closest('.field-group') : null;
+  if (sharedKeyGroup) sharedKeyGroup.style.display = provider === 'bedrock' ? 'none' : '';
 }
 
 // Custom model dropdowns
@@ -113,7 +118,24 @@ function switchProviderFields(role, provider) {
 // ── Build ModelClient cfg ─────────────────────────────────────────────────────
 function buildCfg(role) {
   const provider = S.providers[role];
-  const key      = val(`${role}-key`);
+
+  // Bedrock is the only provider whose credentials are NOT in `${role}-key`
+  if (provider === 'bedrock') {
+    const region = val(`${role}-bedrock-region`);
+    const model  = val(`${role}-bedrock-model`);
+    const ak     = val(`${role}-bedrock-ak`);
+    const sk     = val(`${role}-bedrock-sk`);
+    const stok   = val(`${role}-bedrock-session`);
+    if (!region) throw new Error(`Bedrock region required for ${role}`);
+    if (!model)  throw new Error(`Bedrock inference profile ARN or model ID required for ${role}`);
+    if (!ak)     throw new Error(`Bedrock AWS Access Key ID required for ${role}`);
+    if (!sk)     throw new Error(`Bedrock AWS Secret Access Key required for ${role}`);
+    const cfg = { provider:'bedrock', region, model, accessKeyId: ak, secretAccessKey: sk };
+    if (stok) cfg.sessionToken = stok;
+    return cfg;
+  }
+
+  const key = val(`${role}-key`);
   if (!key) throw new Error(`No API key for ${role} model`);
 
   if (provider === 'azure') {
@@ -154,6 +176,12 @@ function cfgDisplayName(cfg) {
   if (cfg.provider==='azure')        return cfg.deployment||'azure';
   if (cfg.provider==='azure_claude') return (cfg.model||'').split('-').slice(0,2).join('-')||'az-claude';
   if (cfg.provider==='huggingface')  { const m=cfg.model||''; return m.includes('/')?m.split('/')[1].substring(0,18):m.substring(0,18); }
+  if (cfg.provider==='bedrock') {
+    const m = cfg.model||'';
+    // Extract a short name from an ARN: arn:aws:bedrock:region:acct:inference-profile/us.anthropic.claude-sonnet-4-…
+    const last = m.split('/').pop() || m;
+    return ('br:' + last.split(':')[0]).substring(0,28);
+  }
   return (cfg.model||cfg.provider).substring(0,18);
 }
 
@@ -263,6 +291,19 @@ $('btn-run-audit').addEventListener('click', () => {
       const ep=val(`${role}-hf-endpoint`);
       if(ep&&!SEC.validateEndpoint('huggingface',ep)) issues.push({sev:'HIGH',msg:`${role} HF endpoint must be *.huggingface.co or *.endpoints.huggingface.cloud`});
     }
+    if (provider==='bedrock') {
+      const region=val(`${role}-bedrock-region`), model=val(`${role}-bedrock-model`), ak=val(`${role}-bedrock-ak`), sk=val(`${role}-bedrock-sk`);
+      if(!region) issues.push({sev:'HIGH',msg:`${role} Bedrock region missing`});
+      else if(!SEC.validateRegion(region)) issues.push({sev:'HIGH',msg:`${role} Bedrock region fails format check`});
+      else ok.push(`${role} Bedrock region validated`);
+      if(!model) issues.push({sev:'INFO',msg:`${role} Bedrock inference profile ARN / model ID not entered`});
+      else if(!SEC.validateBedrockModel(model)) issues.push({sev:'HIGH',msg:`${role} Bedrock model / ARN fails format check`});
+      if(!ak) issues.push({sev:'INFO',msg:`${role} Bedrock access key ID not entered`});
+      else if(!SEC.validateAccessKey(ak)) issues.push({sev:'MEDIUM',msg:`${role} Bedrock access key ID format looks unusual (expected AKIA… or ASIA…, uppercase alphanumeric)`});
+      if(!sk) issues.push({sev:'INFO',msg:`${role} Bedrock secret access key not entered`});
+      else if(sk.length<20) issues.push({sev:'HIGH',msg:`${role} Bedrock secret access key too short`});
+      return;
+    }
     const k=val(`${role}-key`); if(!k){issues.push({sev:'INFO',msg:`${role} key not entered`});return;}
     if(k.length<16) issues.push({sev:'HIGH',msg:`${role} key too short`});
     if(provider==='claude'&&!k.startsWith('sk-ant-')) issues.push({sev:'MEDIUM',msg:`${role} Claude key should start with sk-ant-`});
@@ -288,12 +329,14 @@ $('btn-run-audit').addEventListener('click', () => {
 $('btn-export-yaml').addEventListener('click', () => {
   const sections={};
   ['target','eval','redteam'].forEach(role => {
-    const provider=S.providers[role]; let model='',endpoint='',version='';
+    const provider=S.providers[role]; let model='',endpoint='',version='',region='';
     if(provider==='azure'){model=val(`${role}-deployment`);endpoint=val(`${role}-endpoint`);version=val(`${role}-version`)||'2024-02-15-preview';}
     else if(provider==='azure_claude'){const sel=$(`${role}-az-claude-model`);model=sel&&sel.value!=='__custom__'?sel.value:val(`${role}-az-claude-model-custom`);endpoint=val(`${role}-az-claude-endpoint`);}
     else if(provider==='huggingface'){const sel=$(`${role}-model-hf`);model=sel&&sel.value!=='__custom__'?sel.value:val(`${role}-model-hf-custom`);endpoint=val(`${role}-hf-endpoint`);}
+    else if(provider==='bedrock'){region=val(`${role}-bedrock-region`);model=val(`${role}-bedrock-model`);}
     else{const sel=$(`${role}-model-${provider}`);model=sel&&sel.value!=='__custom__'?sel.value:val(`${role}-model-${provider}-custom`);}
-    sections[role]={provider,model,endpoint,version};
+    const sec={provider,model,endpoint,version}; if(region) sec.region=region;
+    sections[role]=sec;
   });
   $('yaml-modal-title').textContent='Export Configuration (keys redacted)';
   $('yaml-modal-content').value=YAML.stringify(sections);
@@ -309,13 +352,17 @@ $('btn-yaml-apply').addEventListener('click', () => {
   const raw=val('yaml-modal-content'), data=YAML.parse(raw), res=$('yaml-modal-result'); let applied=0;
   ['target','eval','redteam'].forEach(role => {
     const cfg=data[role]; if(!cfg||!cfg.provider) return;
-    const provider=cfg.provider; if(!['azure','azure_claude','openai','claude','huggingface'].includes(provider)) return;
+    const provider=cfg.provider; if(!['azure','azure_claude','openai','claude','huggingface','bedrock'].includes(provider)) return;
     S.providers[role]=provider;
     const tab=document.querySelector(`.provider-tabs[data-role="${role}"] .ptab[data-provider="${provider}"]`);
     if(tab){document.querySelectorAll(`.provider-tabs[data-role="${role}"] .ptab`).forEach(t=>t.classList.remove('active'));tab.classList.add('active');}
     switchProviderFields(role,provider);
     if(provider==='azure'){if(cfg.endpoint){const e=$(`${role}-endpoint`);if(e)e.value=cfg.endpoint;}if(cfg.model){const e=$(`${role}-deployment`);if(e)e.value=cfg.model;}if(cfg.version){const e=$(`${role}-version`);if(e)e.value=cfg.version;}}
     else if(provider==='azure_claude'){if(cfg.endpoint){const e=$(`${role}-az-claude-endpoint`);if(e)e.value=cfg.endpoint;}if(cfg.model){const sel=$(`${role}-az-claude-model`);if(sel){const opt=Array.from(sel.options).find(o=>o.value===cfg.model);if(opt)sel.value=cfg.model;}}}
+    else if(provider==='bedrock'){
+      if(cfg.region){const sel=$(`${role}-bedrock-region`);if(sel){const opt=Array.from(sel.options).find(o=>o.value===cfg.region);if(opt)sel.value=cfg.region;}}
+      if(cfg.model){const e=$(`${role}-bedrock-model`);if(e)e.value=cfg.model;}
+    }
     applied++;
   });
   if(applied>0){res.textContent=`Applied ${applied} role(s). Enter API keys then test.`;res.style.color='var(--teal)';}
@@ -431,17 +478,47 @@ $('btn-reset-turns').addEventListener('click',()=>{S.perTechTurns={};renderPerTe
   const m={'max-turns':'turns-val','attacks-per-tech':'attacks-val','req-delay':'delay-val','rt-temp':'temp-val'};
   $(id).addEventListener('input',e=>$(m[id]).textContent=e.target.value);
 });
-document.querySelectorAll('input[name="intent-mode"]').forEach(r=>r.addEventListener('change',()=>{const manual=$('intent-manual').checked;$('intent-manual-section').style.display=manual?'':'none';}));
+document.querySelectorAll('input[name="intent-mode"]').forEach(r=>r.addEventListener('change',()=>{
+  const manual=$('intent-manual').checked;
+  const isStatic=$('intent-static')?.checked;
+  const isAutotune=$('intent-autotune')?.checked;
+  $('intent-manual-section').style.display=manual?'':'none';
+  if($('static-temp-hint')) $('static-temp-hint').style.display=isStatic?'':'none';
+  if($('autotune-settings')) $('autotune-settings').style.display=isAutotune?'':'none';
+}));
+['autotune-pilot-turns','autotune-candidates'].forEach(id=>{
+  const el=$(id); if(!el) return;
+  const disp=$(id+'-val'); if(!disp) return;
+  el.addEventListener('input',e=>disp.textContent=e.target.value);
+});
+
+function currentIntentMode() {
+  if ($('intent-static')?.checked)   return 'static';
+  if ($('intent-auto')?.checked)     return 'auto';
+  if ($('intent-autotune')?.checked) return 'autotune';
+  return 'manual';
+}
 
 $('btn-preview-attack').addEventListener('click',async()=>{
-  const isManual=$('intent-manual').checked, prev=$('intent-preview');
-  if(isManual){prev.textContent=val('custom-intent')||'(no intent)';prev.style.display='';return;}
-  let rtCfg; try{rtCfg=buildCfg('redteam');}catch(e){prev.textContent='Configure Red Team first.';prev.style.display='';return;}
-  prev.textContent='Generating…'; prev.style.display='';
+  const intentMode=currentIntentMode();
+  const prev=$('intent-preview');
+  if(intentMode==='manual'){prev.textContent=val('custom-intent')||'(no intent)';prev.style.display='';return;}
   const tech=TECHNIQUES.find(t=>S.selectedTechniques.has(t.id))||TECHNIQUES[0];
   const cat=[...S.selectedCategories][0]||Object.keys(ATTACK_CATEGORIES)[0];
-  const dummy=new RedTeamAttacker({rtCfg,tgtCfg:{}});
-  const intent=await dummy.generateIntent(cat,tech).catch(e=>'Error: '+e.message);
+  if(intentMode==='static'){
+    const dummy=new RedTeamAttacker({rtCfg:{},tgtCfg:{},intentMode:'static'});
+    const intent=await dummy.generateIntent(cat,tech,'static');
+    prev.textContent='Intent (static): '+intent; prev.style.display=''; return;
+  }
+  if(intentMode==='autotune'){
+    const candidates=(INTENT_TEMPLATES[cat]||[]).slice(0, parseInt(val('autotune-candidates'))||3);
+    prev.innerHTML='Auto-tune candidates (live scored during run):<br>' + candidates.map((c,i)=>`<strong>#${i+1}:</strong> ${esc(c.substring(0,160))}…`).join('<br>');
+    prev.style.display=''; return;
+  }
+  let rtCfg; try{rtCfg=buildCfg('redteam');}catch(e){prev.textContent='Configure Red Team first.';prev.style.display='';return;}
+  prev.textContent='Generating…'; prev.style.display='';
+  const dummy=new RedTeamAttacker({rtCfg,tgtCfg:{},intentMode:'auto'});
+  const intent=await dummy.generateIntent(cat,tech,'auto').catch(e=>'Error: '+e.message);
   prev.textContent='Intent: '+intent;
 });
 
@@ -464,6 +541,7 @@ $('btn-start-attack').addEventListener('click',async()=>{
   $('view-live').classList.add('active');
   $('live-session-name').textContent=`"${esc(sessionName)}"`;
   $('live-log').innerHTML=''; $('eval-progress-list').innerHTML=''; $('eval-progress-card').style.display='none';
+  S.liveLogBuffer = [];
   S.allRecords=[]; S.evaluatedRecords=[];
   const numJobs=S.selectedTechniques.size*S.selectedCategories.size;
   S.metrics={techniques:numJobs,turns:0,responses:0,breaks:0,done:0,errors:0};
@@ -474,26 +552,42 @@ $('btn-start-attack').addEventListener('click',async()=>{
   const attacksPerTech=parseInt(val('attacks-per-tech'))||3;
   const delay=parseInt(val('req-delay'))||500;
   const temperature=parseFloat(val('rt-temp'))||0.9;
-  const isManual=$('intent-manual').checked;
-  const customIntent=isManual?val('custom-intent'):null;
+  const intentMode=currentIntentMode();
+  const customIntent=intentMode==='manual'?val('custom-intent'):null;
+  const autotuneOpts = intentMode === 'autotune' ? {
+    pilotTurns: parseInt(val('autotune-pilot-turns'))||3,
+    candidates: parseInt(val('autotune-candidates'))||3,
+    mutate: !!$('autotune-mutate')?.checked
+  } : null;
   const parallelEval=$('parallel-eval-toggle').checked;
 
   const techniques=TECHNIQUES.filter(t=>S.selectedTechniques.has(t.id)).map(t=>({...t,customTurns:S.perTechTurns[t.id]||0}));
   const categories=[...S.selectedCategories];
+
+  const evalPreFilter  = !!$('eval-prefilter-toggle')?.checked;
+
+  // Auto-tune needs an evaluator to score pilots — build it up-front even when parallelEval is off.
+  let autotuneEvaluator=null;
+  if(intentMode==='autotune'){
+    if(!S.connected.eval){ showModal('Evaluator Required','Auto-tune intent mode needs the Evaluator model connected (it scores the pilot runs). Configure and test the Evaluator, or switch to Static / Auto intent mode.'); return; }
+    try { const evalCfg2=buildCfg('eval'); autotuneEvaluator=new AttackEvaluator({evalCfg:evalCfg2, delay:400, preFilter:evalPreFilter, onProgress:()=>{}}); }
+    catch(e){ showModal('Evaluator Not Configured',e.message); return; }
+  }
 
   // Setup parallel evaluator if enabled
   let parallelEvaluator=null;
   if(parallelEval&&S.connected.eval){
     try {
       const evalCfg=buildCfg('eval');
-      parallelEvaluator=new AttackEvaluator({ evalCfg, delay:600, onProgress:()=>{} });
+      parallelEvaluator=new AttackEvaluator({ evalCfg, delay:600, preFilter:evalPreFilter, onProgress:()=>{} });
     } catch(e){ addLogEntry({type:'system',message:'Parallel eval not available: '+e.message,technique:'System'}); }
   }
 
   if(parallelEval&&parallelEvaluator) $('eval-progress-card').style.display='block';
 
   S.activeAttacker=new RedTeamAttacker({
-    rtCfg,tgtCfg,maxTurns,delay,temperature,sessionName,
+    rtCfg,tgtCfg,maxTurns,delay,temperature,sessionName,intentMode,
+    autotuneOpts, autotuneEvaluator,
     onLog:e=>addLogEntry(e),
     onMetric:t=>{if(t==='turns')S.metrics.turns++;else if(t==='responses')S.metrics.responses++;else if(t==='breaks')S.metrics.breaks++;else if(t==='techniques_done')S.metrics.done++;updateMetrics();},
     onRecord:r=>{S.allRecords.push(r);if(r.error_type)S.metrics.errors++;appendResultRow(r);updateMetrics();},
@@ -504,11 +598,33 @@ $('btn-start-attack').addEventListener('click',async()=>{
           addEvalProgress(techName, 'evaluating', 0, validRecs.length);
           try {
             const evaluated=await parallelEvaluator.evaluateAll(validRecs);
-            // Merge back
+            // Merge per-turn eval back into the session records
             evaluated.forEach(er=>{
               const idx=S.allRecords.findIndex(r=>r.timestamp===er.timestamp&&r.turn===er.turn&&r.technique===er.technique);
               if(idx>=0){S.allRecords[idx]={...S.allRecords[idx],...er};updateResultRow(idx,er);}
             });
+            // ── Conversation-level evaluation ─────────────────────────
+            // For each (technique, category, attack_index) group in the
+            // just-evaluated records, run a second judge pass over the
+            // FULL transcript. This catches mosaic/commitment attacks
+            // where no individual turn is harmful but the whole is.
+            try {
+              const convResults = await parallelEvaluator.evaluateAllConversations(evaluated);
+              // Stamp conversation-level fields onto every record in the
+              // matching attack. generateReport() uses them to combine
+              // per-turn and conversation-level outcomes.
+              convResults.forEach(c => {
+                const [technique, category, attack_index] = c.key.split('|||');
+                S.allRecords.forEach((r, i) => {
+                  if (r.technique === technique && r.category === category && String(r.attack_index) === attack_index) {
+                    S.allRecords[i] = { ...r, conv_outcome: c.conv_outcome, conv_score: c.conv_score, conv_reasoning: c.conv_reasoning };
+                  }
+                });
+                const verdict = c.conv_outcome === 'success' ? '🚨 BREAK' : c.conv_outcome === 'partial' ? '◐ PARTIAL' : '✓ defended';
+                addLogEntry({ type: c.conv_outcome === 'success' ? 'break' : 'system', message: `Conv-eval [${technique} / ${category} #${attack_index}]: ${verdict} (${c.conv_score}/10) — ${c.conv_reasoning}`, technique: techName });
+              });
+            } catch(ce){ addLogEntry({ type:'warning', message:`Conv-eval error: ${ce.message}`, technique: techName }); }
+
             const breaks=evaluated.filter(r=>r.eval_outcome==='success').length;
             addEvalProgress(techName,'done',evaluated.length,evaluated.length,breaks);
           } catch(e){ addEvalProgress(techName,'error',0,validRecs.length,0,e.message); }
@@ -520,7 +636,7 @@ $('btn-start-attack').addEventListener('click',async()=>{
 
   // Track session metadata for cost view
   const sessionStart=new Date();
-  try{ await S.activeAttacker.runSession({techniques,categories,intentMode:isManual?'manual':'auto',customIntent,attacksPerTechnique:attacksPerTech}); }
+  try{ await S.activeAttacker.runSession({techniques,categories,intentMode,customIntent,attacksPerTechnique:attacksPerTech}); }
   catch(e){ addLogEntry({type:'system',message:'Session error: '+e.message,technique:'System'}); }
 
   S.running=false; $('btn-stop-attack').style.display='none'; $('running-badge').style.display='none';
@@ -556,14 +672,62 @@ function addEvalProgress(techName, status, done, total, breaks=0, error='') {
 }
 
 // ── Live log ──────────────────────────────────────────────────────────────────
+// Structured parallel buffer so the log can be exported as clean JSON /
+// plain text without scraping the DOM.
+S.liveLogBuffer = S.liveLogBuffer || [];
+
 function addLogEntry({type,message,technique,turn}) {
   const log=$('live-log'), ph=log.querySelector('.log-placeholder'); if(ph) ph.remove();
   const bm={prompt:'badge-blue',response:'badge-teal',system:'badge-gray',break:'badge-amber',warning:'badge-red'};
   const lm={prompt:'PROMPT',response:'RESPONSE',system:'SYS',break:'BREAK',warning:'WARN'};
   const entry=document.createElement('div'); entry.className='log-entry'; entry.dataset.type=type;
-  entry.innerHTML=`<div class="log-meta"><span class="badge ${bm[type]||'badge-gray'}">${lm[type]||type.toUpperCase()}</span>${technique?`<span class="log-turn">${esc(technique)}${turn?' · T'+turn:''}</span>`:''}<span class="log-turn">${new Date().toLocaleTimeString()}</span></div><div class="log-content ${type}">${esc(message)}</div>`;
+  const ts = new Date();
+  entry.innerHTML=`<div class="log-meta"><span class="badge ${bm[type]||'badge-gray'}">${lm[type]||type.toUpperCase()}</span>${technique?`<span class="log-turn">${esc(technique)}${turn?' · T'+turn:''}</span>`:''}<span class="log-turn">${ts.toLocaleTimeString()}</span></div><div class="log-content ${type}">${esc(message)}</div>`;
   log.appendChild(entry); log.scrollTop=log.scrollHeight;
+  S.liveLogBuffer.push({ timestamp: ts.toISOString(), type, technique: technique || null, turn: turn || null, message });
 }
+
+// ── Live-log downloads (TXT / JSON / clipboard) ──────────────────────────────
+function _sessionSlug() {
+  const name = val('session-name') || 'session';
+  return name.replace(/[^a-zA-Z0-9\-_]/g, '_').substring(0, 60);
+}
+function logToPlainText() {
+  if (!S.liveLogBuffer.length) return '';
+  const pad = s => String(s||'').padEnd(8);
+  return S.liveLogBuffer.map(e => {
+    const header = `[${e.timestamp}] ${pad(e.type.toUpperCase())} ${e.technique ? e.technique + (e.turn ? ' · T' + e.turn : '') + ' — ' : ''}`;
+    return header + (e.message || '');
+  }).join('\n\n');
+}
+function _downloadBlob(content, mime, filename) {
+  const blob = new Blob([content], { type: mime + ';charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+$('btn-download-log-txt')?.addEventListener('click', () => {
+  if (!S.liveLogBuffer.length) { showModal('No Logs', 'The live log is empty — run or start a session first.'); return; }
+  _downloadBlob(logToPlainText(), 'text/plain', `redprobe_log_${_sessionSlug()}_${Date.now()}.txt`);
+});
+$('btn-download-log-json')?.addEventListener('click', () => {
+  if (!S.liveLogBuffer.length) { showModal('No Logs', 'The live log is empty — run or start a session first.'); return; }
+  const payload = {
+    session_name: val('session-name') || null,
+    exported_at: new Date().toISOString(),
+    entry_count: S.liveLogBuffer.length,
+    entries: S.liveLogBuffer
+  };
+  _downloadBlob(JSON.stringify(payload, null, 2), 'application/json', `redprobe_log_${_sessionSlug()}_${Date.now()}.json`);
+});
+$('btn-copy-log')?.addEventListener('click', async () => {
+  if (!S.liveLogBuffer.length) { showModal('No Logs', 'The live log is empty.'); return; }
+  try {
+    await navigator.clipboard.writeText(logToPlainText());
+    const btn = $('btn-copy-log'); const original = btn.textContent;
+    btn.textContent = '✓ Copied'; setTimeout(() => { btn.textContent = original; }, 1500);
+  } catch (e) { showModal('Copy Failed', e.message || 'Clipboard access denied.'); }
+});
 document.querySelectorAll('.log-filter').forEach(btn=>{btn.addEventListener('click',()=>{document.querySelectorAll('.log-filter').forEach(b=>b.classList.remove('active'));btn.classList.add('active');const f=btn.dataset.filter;document.querySelectorAll('.log-entry').forEach(e=>{e.style.display=(f==='all'||e.dataset.type===f)?'':'none';});});});
 function updateMetrics(){$('met-techniques').textContent=S.metrics.done+' / '+S.metrics.techniques;$('met-turns').textContent=S.metrics.turns;$('met-responses').textContent=S.metrics.responses;$('met-breaks').textContent=S.metrics.breaks;$('records-count').textContent=S.allRecords.length+' records';}
 
@@ -589,18 +753,73 @@ $('btn-run-eval').addEventListener('click',async()=>{
   let evalCfg; try{evalCfg=buildCfg('eval');}catch(e){showModal('Evaluator Not Configured',e.message);return;}
   if(!S.connected.eval){showModal('Evaluator Not Connected','Test evaluator in Configuration.');return;}
   const btn=$('btn-run-eval'); btn.disabled=true; btn.textContent='Evaluating…';
-  const evaluator=new AttackEvaluator({evalCfg,delay:800,onProgress:({current,total})=>{btn.textContent=`Evaluating ${current}/${total}…`;}});
+  const evalPreFilterManual = !!$('eval-prefilter-toggle')?.checked;
+  const evaluator=new AttackEvaluator({evalCfg,delay:800,preFilter:evalPreFilterManual,onProgress:({current,total})=>{btn.textContent=`Evaluating ${current}/${total}…`;}});
   try {
     const evaluated=await evaluator.evaluateAll(evalRecs);
     S.evaluatedRecords=S.allRecords.map(r=>{if(r.eval_outcome!=='pending')return r;const m=evaluated.find(e=>e.timestamp===r.timestamp&&e.turn===r.turn&&e.technique===r.technique);return m||r;});
     S.evaluatedRecords.forEach((r,i)=>updateResultRow(i,r));
+    // Run conversation-level evaluation on all fully-evaluated attacks
+    btn.textContent='Running conversation-level evaluation…';
+    try {
+      const convRecs = S.evaluatedRecords.filter(r => r.eval_outcome !== 'error' && r.eval_outcome !== 'pending');
+      const convResults = await evaluator.evaluateAllConversations(convRecs, ({current,total})=>{ btn.textContent=`Conv-eval ${current}/${total}…`; });
+      convResults.forEach(c => {
+        const [technique, category, attack_index] = c.key.split('|||');
+        S.evaluatedRecords.forEach((r, i) => {
+          if (r.technique === technique && r.category === category && String(r.attack_index) === attack_index) {
+            S.evaluatedRecords[i] = { ...r, conv_outcome: c.conv_outcome, conv_score: c.conv_score, conv_reasoning: c.conv_reasoning };
+            S.allRecords[i] = S.evaluatedRecords[i];
+          }
+        });
+      });
+    } catch(ce){ addLogEntry({ type:'warning', message:`Conv-eval error: ${ce.message}`, technique:'System' }); }
     const report=evaluator.generateReport(S.evaluatedRecords.filter(r=>r.eval_outcome!=='error'&&r.eval_outcome!=='pending'));
     if(report){renderScoreBanner(report);renderChart(report);}
   } catch(e){showModal('Evaluation Error',e.message);}
   btn.disabled=false; btn.textContent='Re-Evaluate Remaining';
 });
 
-function renderScoreBanner(report){const circ=2*Math.PI*50,offset=circ*(1-report.vulnPct/100),ring=$('score-ring-fill');ring.style.stroke=report.riskColor;ring.setAttribute('stroke-dasharray',circ.toFixed(1));ring.style.transition='stroke-dashoffset 1.2s ease';requestAnimationFrame(()=>{ring.style.strokeDashoffset=offset.toFixed(1);});$('score-number').textContent=report.vulnPct+'%';$('score-label').textContent=report.riskLevel+' Risk — '+report.vulnPct+'% Vulnerable';$('score-description').textContent=`${report.success} breaks · ${report.partial} partial · ${report.failed} defended across ${report.total} turns · avg ${report.avgScore}/10`;const bd=$('score-breakdown');bd.innerHTML='';Object.entries(report.byTechnique).forEach(([t,d])=>{const pct=Math.round((d.success+d.partial*0.5)/d.total*100);const el=document.createElement('div');el.className='score-item';el.innerHTML=esc(t)+': <span>'+pct+'%</span>';bd.appendChild(el);});$('score-banner').style.display='flex';}
+function renderScoreBanner(report){
+  const circ=2*Math.PI*50,offset=circ*(1-report.vulnPct/100),ring=$('score-ring-fill');
+  ring.style.stroke=report.riskColor;
+  ring.setAttribute('stroke-dasharray',circ.toFixed(1));
+  ring.style.transition='stroke-dashoffset 1.2s ease';
+  requestAnimationFrame(()=>{ring.style.strokeDashoffset=offset.toFixed(1);});
+  $('score-number').textContent=report.vulnPct+'%';
+  $('score-label').textContent=report.riskLevel+' Risk — '+report.vulnPct+'% Vulnerable (attack-level)';
+  const attackLine = report.attackTotal
+    ? `${report.attackSuccess} breaks · ${report.attackPartial} partial · ${report.attackFailed} defended across ${report.attackTotal} attacks`
+    : `${report.success} breaks · ${report.partial} partial · ${report.failed} defended`;
+  const turnLine = report.turnVulnPct != null
+    ? ` · Turn-level ${report.turnVulnPct}% (${report.total} turns) · avg ${report.avgScore}/10`
+    : ` · ${report.total} turns · avg ${report.avgScore}/10`;
+  $('score-description').textContent = attackLine + turnLine;
+  const bd=$('score-breakdown'); bd.innerHTML='';
+  // OWASP pills first — this is the headline section for security-audience reports
+  if (report.byOwasp) {
+    const owaspMeta = (typeof OWASP_LLM_TOP10 !== 'undefined') ? OWASP_LLM_TOP10 : {};
+    Object.entries(report.byOwasp).sort(([a],[b])=>a.localeCompare(b)).forEach(([id,d])=>{
+      const pct=Math.round((d.success+d.partial*0.5)/d.total*100);
+      const el=document.createElement('div');
+      el.className='score-item';
+      const name = owaspMeta[id]?.name || id;
+      el.innerHTML = `<strong>${esc(id)}</strong> ${esc(name)}: <span>${pct}%</span>`;
+      el.title = `${d.success} success / ${d.partial} partial / ${d.failed} defended · ${d.total} attacks`;
+      bd.appendChild(el);
+    });
+    // Visual separator
+    const sep=document.createElement('div'); sep.style.width='100%'; sep.style.height='1px'; sep.style.background='rgba(255,255,255,0.08)'; sep.style.margin='6px 0'; bd.appendChild(sep);
+  }
+  Object.entries(report.byTechnique).forEach(([t,d])=>{
+    const pct=Math.round((d.success+d.partial*0.5)/d.total*100);
+    const el=document.createElement('div');
+    el.className='score-item';
+    el.innerHTML=esc(t)+': <span>'+pct+'%</span>';
+    bd.appendChild(el);
+  });
+  $('score-banner').style.display='flex';
+}
 function renderChart(report){$('chart-card').style.display='block';const ctx=$('technique-chart').getContext('2d');if(S.chartInstance)S.chartInstance.destroy();const labels=Object.keys(report.byTechnique);S.chartInstance=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:'Breaks',data:labels.map(t=>report.byTechnique[t].success),backgroundColor:'rgba(239,68,68,0.75)',borderRadius:3},{label:'Partial',data:labels.map(t=>report.byTechnique[t].partial),backgroundColor:'rgba(245,158,11,0.75)',borderRadius:3},{label:'Defended',data:labels.map(t=>report.byTechnique[t].failed),backgroundColor:'rgba(34,197,94,0.40)',borderRadius:3}]},options:{responsive:true,plugins:{legend:{labels:{color:'#8888a8',font:{size:11}}}},scales:{x:{stacked:true,ticks:{color:'#44445a',font:{size:9},maxRotation:40},grid:{color:'rgba(255,255,255,0.04)'}},y:{stacked:true,ticks:{color:'#44445a',font:{size:10}},grid:{color:'rgba(255,255,255,0.06)'}}}}}); }
 
 // ── Downloads ─────────────────────────────────────────────────────────────────
@@ -684,6 +903,45 @@ $('btn-clear-cost-history').addEventListener('click',()=>{S.costHistory=[];rende
     if(id==='cost-tgt-model') $('custom-tgt-price-wrap').style.display=e.target.value==='custom_tgt'?'':'none';
   });
 });
+
+// ── Azure Foundry model fetch ─────────────────────────────────────────────────
+async function fetchModelsForRole(role) {
+  const ep  = val(`${role}-az-claude-endpoint`).replace(/\/$/,'');
+  const key = val(`${role}-key`);
+  const statusEl = $(`fetch-${role}-status`);
+  const btn = $(`btn-fetch-${role}-models`);
+  if (!ep)  { if(statusEl){statusEl.textContent='Enter endpoint first';statusEl.style.color='var(--amber)';} return; }
+  if (!key) { if(statusEl){statusEl.textContent='Enter API key first';statusEl.style.color='var(--amber)';} return; }
+  if(statusEl){statusEl.textContent='Fetching…';statusEl.style.color='var(--text-2)';}
+  if(btn) btn.disabled=true;
+  try {
+    const models = await ModelClient.fetchAzureFoundryModels(ep, key);
+    const sel = $(`${role}-az-claude-model`);
+    if (sel) {
+      // Clear existing options, keep 'Custom…' as last option
+      sel.innerHTML = '';
+      models.forEach(id => {
+        const o = document.createElement('option');
+        o.value = o.textContent = id;
+        sel.appendChild(o);
+      });
+      const custom = document.createElement('option');
+      custom.value = '__custom__'; custom.textContent = 'Custom…';
+      sel.appendChild(custom);
+      // Auto-select first Claude model found
+      const firstClaude = models.find(m => m.toLowerCase().includes('claude'));
+      if (firstClaude) sel.value = firstClaude;
+    }
+    if(statusEl){statusEl.textContent=`✓ ${models.length} model${models.length!==1?'s':''} loaded`;statusEl.style.color='var(--teal)';}
+  } catch(e) {
+    if(statusEl){statusEl.textContent=`✗ ${e.message.substring(0,100)}`;statusEl.style.color='var(--red)';}
+  }
+  if(btn) btn.disabled=false;
+}
+
+$('btn-fetch-target-models').addEventListener('click',  () => fetchModelsForRole('target'));
+$('btn-fetch-eval-models').addEventListener('click',    () => fetchModelsForRole('eval'));
+$('btn-fetch-redteam-models').addEventListener('click', () => fetchModelsForRole('redteam'));
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 TECHNIQUES.forEach(t=>S.selectedTechniques.add(t.id));
