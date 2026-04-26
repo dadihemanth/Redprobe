@@ -1,0 +1,10 @@
+Option to select multiple attack categories and run the attack
+Button that can collapse and expand the side bar
+Costs and analysis section which will give estimated costs for each run, we should be able to select the runalong with date filters and overall costs till now
+Give a name to the attack before starting it
+I want the evaluation to be done parallely after each technique is done
+
+
+----------------------------------------------------------
+- I want you to add an option to collect Azure foundry Claude models - this is the curl request for that
+-
