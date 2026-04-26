@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 // app.js v5 — sidebar collapse, multi-category, session naming, parallel eval, costs
+=======
+// app.js v6 — adaptive routing, commitment tracking, payload injection, conversation-level eval, OWASP mapping, log downloads
+>>>>>>> f6b5e08a7fc748af977ddd9184b1a7af857c6346
 
 // ── Pricing tables ────────────────────────────────────────────────────────────
 const PRICING = {
@@ -541,6 +545,10 @@ $('btn-start-attack').addEventListener('click',async()=>{
   $('view-live').classList.add('active');
   $('live-session-name').textContent=`"${esc(sessionName)}"`;
   $('live-log').innerHTML=''; $('eval-progress-list').innerHTML=''; $('eval-progress-card').style.display='none';
+<<<<<<< HEAD
+=======
+  S.liveLogBuffer = [];
+>>>>>>> f6b5e08a7fc748af977ddd9184b1a7af857c6346
   S.allRecords=[]; S.evaluatedRecords=[];
   const numJobs=S.selectedTechniques.size*S.selectedCategories.size;
   S.metrics={techniques:numJobs,turns:0,responses:0,breaks:0,done:0,errors:0};
@@ -671,14 +679,71 @@ function addEvalProgress(techName, status, done, total, breaks=0, error='') {
 }
 
 // ── Live log ──────────────────────────────────────────────────────────────────
+<<<<<<< HEAD
+=======
+// Structured parallel buffer so the log can be exported as clean JSON /
+// plain text without scraping the DOM.
+S.liveLogBuffer = S.liveLogBuffer || [];
+
+>>>>>>> f6b5e08a7fc748af977ddd9184b1a7af857c6346
 function addLogEntry({type,message,technique,turn}) {
   const log=$('live-log'), ph=log.querySelector('.log-placeholder'); if(ph) ph.remove();
   const bm={prompt:'badge-blue',response:'badge-teal',system:'badge-gray',break:'badge-amber',warning:'badge-red'};
   const lm={prompt:'PROMPT',response:'RESPONSE',system:'SYS',break:'BREAK',warning:'WARN'};
   const entry=document.createElement('div'); entry.className='log-entry'; entry.dataset.type=type;
+<<<<<<< HEAD
   entry.innerHTML=`<div class="log-meta"><span class="badge ${bm[type]||'badge-gray'}">${lm[type]||type.toUpperCase()}</span>${technique?`<span class="log-turn">${esc(technique)}${turn?' · T'+turn:''}</span>`:''}<span class="log-turn">${new Date().toLocaleTimeString()}</span></div><div class="log-content ${type}">${esc(message)}</div>`;
   log.appendChild(entry); log.scrollTop=log.scrollHeight;
 }
+=======
+  const ts = new Date();
+  entry.innerHTML=`<div class="log-meta"><span class="badge ${bm[type]||'badge-gray'}">${lm[type]||type.toUpperCase()}</span>${technique?`<span class="log-turn">${esc(technique)}${turn?' · T'+turn:''}</span>`:''}<span class="log-turn">${ts.toLocaleTimeString()}</span></div><div class="log-content ${type}">${esc(message)}</div>`;
+  log.appendChild(entry); log.scrollTop=log.scrollHeight;
+  S.liveLogBuffer.push({ timestamp: ts.toISOString(), type, technique: technique || null, turn: turn || null, message });
+}
+
+// ── Live-log downloads (TXT / JSON / clipboard) ──────────────────────────────
+function _sessionSlug() {
+  const name = val('session-name') || 'session';
+  return name.replace(/[^a-zA-Z0-9\-_]/g, '_').substring(0, 60);
+}
+function logToPlainText() {
+  if (!S.liveLogBuffer.length) return '';
+  const pad = s => String(s||'').padEnd(8);
+  return S.liveLogBuffer.map(e => {
+    const header = `[${e.timestamp}] ${pad(e.type.toUpperCase())} ${e.technique ? e.technique + (e.turn ? ' · T' + e.turn : '') + ' — ' : ''}`;
+    return header + (e.message || '');
+  }).join('\n\n');
+}
+function _downloadBlob(content, mime, filename) {
+  const blob = new Blob([content], { type: mime + ';charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+$('btn-download-log-txt')?.addEventListener('click', () => {
+  if (!S.liveLogBuffer.length) { showModal('No Logs', 'The live log is empty — run or start a session first.'); return; }
+  _downloadBlob(logToPlainText(), 'text/plain', `redprobe_log_${_sessionSlug()}_${Date.now()}.txt`);
+});
+$('btn-download-log-json')?.addEventListener('click', () => {
+  if (!S.liveLogBuffer.length) { showModal('No Logs', 'The live log is empty — run or start a session first.'); return; }
+  const payload = {
+    session_name: val('session-name') || null,
+    exported_at: new Date().toISOString(),
+    entry_count: S.liveLogBuffer.length,
+    entries: S.liveLogBuffer
+  };
+  _downloadBlob(JSON.stringify(payload, null, 2), 'application/json', `redprobe_log_${_sessionSlug()}_${Date.now()}.json`);
+});
+$('btn-copy-log')?.addEventListener('click', async () => {
+  if (!S.liveLogBuffer.length) { showModal('No Logs', 'The live log is empty.'); return; }
+  try {
+    await navigator.clipboard.writeText(logToPlainText());
+    const btn = $('btn-copy-log'); const original = btn.textContent;
+    btn.textContent = '✓ Copied'; setTimeout(() => { btn.textContent = original; }, 1500);
+  } catch (e) { showModal('Copy Failed', e.message || 'Clipboard access denied.'); }
+});
+>>>>>>> f6b5e08a7fc748af977ddd9184b1a7af857c6346
 document.querySelectorAll('.log-filter').forEach(btn=>{btn.addEventListener('click',()=>{document.querySelectorAll('.log-filter').forEach(b=>b.classList.remove('active'));btn.classList.add('active');const f=btn.dataset.filter;document.querySelectorAll('.log-entry').forEach(e=>{e.style.display=(f==='all'||e.dataset.type===f)?'':'none';});});});
 function updateMetrics(){$('met-techniques').textContent=S.metrics.done+' / '+S.metrics.techniques;$('met-turns').textContent=S.metrics.turns;$('met-responses').textContent=S.metrics.responses;$('met-breaks').textContent=S.metrics.breaks;$('records-count').textContent=S.allRecords.length+' records';}
 

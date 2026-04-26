@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 // model-client.js v5 — Azure Foundry Claude + CURL parser + multi-provider
+=======
+// model-client.js v6 — Azure Foundry Claude + CURL parser + multi-provider + AWS Bedrock SigV4 + prompt caching + assistant prefill
+>>>>>>> f6b5e08a7fc748af977ddd9184b1a7af857c6346
 
 const SEC = {
   AZURE_HOST_RE: /^https:\/\/[a-zA-Z0-9][a-zA-Z0-9\-]{0,62}\.(openai\.azure\.com|cognitiveservices\.azure\.com|services\.ai\.azure\.com)(\/.*)?$/,

@@ -746,7 +746,11 @@ HARD STEALTH RULES:
     turn_strategy: "deepen"
   },
 
+<<<<<<< HEAD
   // ── Multilingual / Cognitive / Recursive (v5 additions) ──────────────────
+=======
+  // ── Multilingual / Cognitive / Recursive (v6 additions) ──────────────────
+>>>>>>> f6b5e08a7fc748af977ddd9184b1a7af857c6346
 
   {
     id: "cross_lingual_pivot",

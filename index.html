@@ -29,7 +29,11 @@
                        https://bedrock-runtime.sa-east-1.amazonaws.com;
            style-src 'self' 'unsafe-inline';
            img-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';">
+<<<<<<< HEAD
 <title>RedProbe v5 — AI Security</title>
+=======
+<title>RedProbe v6 — AI Security</title>
+>>>>>>> f6b5e08a7fc748af977ddd9184b1a7af857c6346
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -44,7 +48,11 @@
         </svg>
       </div>
       <span class="logo-text sidebar-text">RedProbe</span>
+<<<<<<< HEAD
       <span class="logo-ver sidebar-text">v5</span>
+=======
+      <span class="logo-ver sidebar-text">v6</span>
+>>>>>>> f6b5e08a7fc748af977ddd9184b1a7af857c6346
       <button class="sidebar-collapse-btn" id="sidebar-collapse" title="Collapse sidebar">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
       </button>
@@ -571,6 +579,11 @@
             <button class="log-filter" data-filter="response">Responses</button>
             <button class="log-filter" data-filter="system">System</button>
             <button class="log-filter" data-filter="break">Breaks</button>
+            <span style="display:inline-flex;gap:6px;margin-left:10px;border-left:1px solid var(--border);padding-left:10px">
+              <button class="log-filter" id="btn-download-log-txt"  title="Download full log as plain text">⭳ TXT</button>
+              <button class="log-filter" id="btn-download-log-json" title="Download full log as structured JSON">⭳ JSON</button>
+              <button class="log-filter" id="btn-copy-log"          title="Copy full log to clipboard">⎘ Copy</button>
+            </span>
           </div>
         </div>
         <div class="live-log" id="live-log"><div class="log-placeholder">Session log appears here…</div></div>
