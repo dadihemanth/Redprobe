@@ -33,7 +33,8 @@
                        https://bedrock-runtime.sa-east-1.amazonaws.com;
            style-src 'self' 'unsafe-inline';
            img-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';">
-<title>RedProbe v8 — AI Security</title>
+<title>RedProbe v9 — AI Security</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'><rect width='20' height='20' rx='4' fill='%23ef4444'/><circle cx='10' cy='10' r='6.5' stroke='white' stroke-width='1.4' fill='none'/><line x1='10' y1='2' x2='10' y2='6.5' stroke='white' stroke-width='1.4' stroke-linecap='round'/><line x1='10' y1='13.5' x2='10' y2='18' stroke='white' stroke-width='1.4' stroke-linecap='round'/><line x1='2' y1='10' x2='6.5' y2='10' stroke='white' stroke-width='1.4' stroke-linecap='round'/><line x1='13.5' y1='10' x2='18' y2='10' stroke='white' stroke-width='1.4' stroke-linecap='round'/><circle cx='10' cy='10' r='1.8' fill='white'/></svg>">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -43,12 +44,16 @@
     <div class="sidebar-header">
       <div class="logo-icon">
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-          <path d="M10 2L3 6v8l7 4 7-4V6L10 2z" stroke="#3b82f6" stroke-width="1.5" fill="rgba(59,130,246,0.12)"/>
-          <circle cx="10" cy="10" r="2.5" fill="#3b82f6"/>
+          <circle cx="10" cy="10" r="7" stroke="#ef4444" stroke-width="1.5"/>
+          <line x1="10" y1="1" x2="10" y2="7.5" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="10" y1="12.5" x2="10" y2="19" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="1" y1="10" x2="7.5" y2="10" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="12.5" y1="10" x2="19" y2="10" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="10" cy="10" r="2" fill="white"/>
         </svg>
       </div>
       <span class="logo-text sidebar-text"><span class="logo-red">Red</span><span class="logo-probe">probe</span></span>
-      <span class="logo-ver sidebar-text">v8</span>
+      <span class="logo-ver sidebar-text">v9</span>
       <button class="sidebar-collapse-btn" id="sidebar-collapse" title="Collapse sidebar">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
       </button>
@@ -245,6 +250,73 @@
           </div>
           <button class="btn-test" id="btn-test-target">Test Target Connection</button>
           <span class="conn-result" id="result-target"></span>
+          <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+            <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">
+              <input type="checkbox" id="compare-mode-toggle" style="width:14px;height:14px"/>
+              <span style="font-weight:600;color:var(--text-1)">Enable Comparison Mode</span>
+              <span class="badge badge-purple" style="font-size:10px">Beta</span>
+            </label>
+            <p style="font-size:11px;color:var(--text-3);margin:4px 0 0 22px">Run the same attack against a second target model and compare results side-by-side.</p>
+          </div>
+        </div>
+
+        <!-- TARGET B — Comparison Mode -->
+        <div class="card config-card" id="target-b-card" style="display:none">
+          <div class="config-card-head">
+            <span class="cfg-pill" style="background:rgba(168,85,247,0.15);color:#c084fc;border:1px solid rgba(168,85,247,0.3)">TARGET B</span>
+            <div><div class="cfg-title">Comparison Target</div><div class="cfg-sub">Second model for side-by-side comparison</div></div>
+          </div>
+          <div class="provider-tabs" data-role="targetB">
+            <button class="ptab" data-provider="azure">Azure OpenAI</button>
+            <button class="ptab" data-provider="azure_claude">Azure Foundry Claude</button>
+            <button class="ptab active" data-provider="openai">OpenAI</button>
+            <button class="ptab" data-provider="claude">Claude API</button>
+            <button class="ptab" data-provider="huggingface">HuggingFace</button>
+          </div>
+          <div class="provider-fields" id="targetB-fields-azure" style="display:none">
+            <div class="field-group"><label>Endpoint URL</label><input type="text" id="targetB-endpoint" placeholder="https://your-resource.openai.azure.com/" autocomplete="off" spellcheck="false"/></div>
+            <div class="field-row-2">
+              <div class="field-group"><label>Deployment</label><input type="text" id="targetB-deployment" placeholder="gpt-4o" autocomplete="off"/></div>
+              <div class="field-group"><label>API Version</label><input type="text" id="targetB-version" value="2024-02-15-preview" autocomplete="off"/></div>
+            </div>
+          </div>
+          <div class="provider-fields" id="targetB-fields-azure_claude" style="display:none">
+            <div class="field-group"><label>Azure Foundry Endpoint</label><input type="text" id="targetB-az-claude-endpoint" placeholder="https://your-resource.services.ai.azure.com" autocomplete="off" spellcheck="false"/></div>
+            <div class="field-group"><label>Model</label>
+              <select id="targetB-az-claude-model">
+                <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+                <option value="claude-opus-4-6">Claude Opus 4.6</option>
+                <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                <option value="__custom__">Custom…</option>
+              </select>
+            </div>
+            <div class="field-group" id="targetB-az-claude-custom-wrap" style="display:none"><input type="text" id="targetB-az-claude-model-custom" placeholder="claude-sonnet-4-6" autocomplete="off"/></div>
+          </div>
+          <div class="provider-fields" id="targetB-fields-openai">
+            <div class="field-group"><label>Model</label>
+              <select id="targetB-model-openai"><option value="gpt-4o">gpt-4o</option><option value="gpt-4o-mini">gpt-4o-mini</option><option value="gpt-4-turbo">gpt-4-turbo</option><option value="gpt-4">gpt-4</option><option value="gpt-3.5-turbo">gpt-3.5-turbo</option><option value="o1-mini">o1-mini</option><option value="__custom__">Custom…</option></select>
+            </div>
+            <div class="field-group" id="targetB-openai-custom-wrap" style="display:none"><input type="text" id="targetB-model-openai-custom" placeholder="model name" autocomplete="off"/></div>
+          </div>
+          <div class="provider-fields" id="targetB-fields-claude" style="display:none">
+            <div class="field-group"><label>Model</label>
+              <select id="targetB-model-claude"><option value="claude-sonnet-4-20250514">Claude Sonnet 4.6</option><option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option><option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option><option value="__custom__">Custom…</option></select>
+            </div>
+            <div class="field-group" id="targetB-claude-custom-wrap" style="display:none"><input type="text" id="targetB-model-claude-custom" placeholder="claude-..." autocomplete="off"/></div>
+          </div>
+          <div class="provider-fields" id="targetB-fields-huggingface" style="display:none">
+            <div class="field-group"><label>Model ID</label>
+              <select id="targetB-model-hf"><option value="meta-llama/Meta-Llama-3.1-70B-Instruct">Llama 3.1 70B</option><option value="meta-llama/Meta-Llama-3.1-8B-Instruct">Llama 3.1 8B</option><option value="mistralai/Mistral-7B-Instruct-v0.3">Mistral 7B</option><option value="Qwen/Qwen2.5-72B-Instruct">Qwen 2.5 72B</option><option value="__custom__">Custom…</option></select>
+            </div>
+            <div class="field-group" id="targetB-hf-custom-wrap" style="display:none"><input type="text" id="targetB-model-hf-custom" placeholder="org/model-name" autocomplete="off"/></div>
+            <div class="field-group"><label>Custom Endpoint (optional)</label><input type="text" id="targetB-hf-endpoint" placeholder="https://your.endpoints.huggingface.cloud" autocomplete="off"/></div>
+          </div>
+          <div class="field-group" style="margin-top:10px">
+            <label id="targetB-key-label">API Key</label>
+            <input type="password" id="targetB-key" placeholder="Paste API key for Target B" autocomplete="off" spellcheck="false"/>
+          </div>
+          <button class="btn-test" id="btn-test-targetB" style="margin-top:8px">Test Target B Connection</button>
+          <span class="conn-result" id="result-targetB"></span>
         </div>
 
       </div>
@@ -392,10 +464,10 @@
           <div class="card-title">Session Parameters</div>
           <div class="field-group"><label>Max Turns per Attack <span class="field-val" id="turns-val">10</span></label><input type="range" min="3" max="20" value="10" id="max-turns"/></div>
           <div class="field-group"><label>Attacks per Technique <span class="field-val" id="attacks-val">3</span></label><input type="range" min="1" max="10" value="3" id="attacks-per-tech"/></div>
-          <div class="field-group"><label>Request Delay ms <span class="field-val" id="delay-val">500</span></label><input type="range" min="200" max="5000" step="100" value="500" id="req-delay"/></div>
+          <div class="field-group"><label>Request Delay ms <span class="field-val" id="delay-val">200</span></label><input type="range" min="0" max="5000" step="50" value="200" id="req-delay"/></div>
           <div class="field-group"><label>Temperature <span class="field-val" id="temp-val">0.9</span></label><input type="range" min="0" max="1" step="0.1" value="0.9" id="rt-temp"/></div>
-          <div class="field-group"><label>Concurrency (parallel technique×category jobs) <span class="field-val" id="concurrency-val">1</span></label><input type="range" min="1" max="8" step="1" value="1" id="concurrency"/></div>
-          <span class="field-hint" style="margin-top:-6px">Higher = faster, but bounded by provider RPM caps. Default 1 (sequential).</span>
+          <div class="field-group"><label>Concurrency (parallel technique×category jobs) <span class="field-val" id="concurrency-val">4</span></label><input type="range" min="1" max="16" step="1" value="4" id="concurrency"/></div>
+          <span class="field-hint" style="margin-top:-6px">Higher = faster, but bounded by provider RPM caps. Default 4 (parallel).</span>
           <label class="radio-label" style="margin-top:8px">
             <input type="checkbox" id="parallel-eval-toggle" checked/>
             <span>Parallel evaluation after each technique</span>
@@ -466,6 +538,7 @@
       <div class="card" style="margin-top:14px">
         <div class="card-title">Launch</div>
         <div style="font-size:13px;color:var(--text-2);margin-bottom:8px" id="ab-launch-summary">Pick categories and at least one probe in any family.</div>
+        <div id="launch-cost-estimate" style="display:none;margin-bottom:10px;padding:7px 10px;background:var(--blue-dim);border:1px solid var(--border-blue);border-radius:6px;font-size:12px"></div>
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
           <button class="btn-primary btn-large" id="btn-start-attack">Launch Session</button>
           <button class="btn-secondary" id="btn-preview-attack">Preview Intent</button>
@@ -476,7 +549,8 @@
 
     <!-- ══ LLM ATTACK BUILDER (techniques + filter probes only) ══ -->
     <div class="view" id="view-attack">
-      <div class="view-header"><div><h1>LLM Attack Builder</h1><p class="view-sub">Pick model-safety techniques (27) and Filter-Layer Probes (12). Session params, categories, and Launch live in the unified <strong>Attack Builder</strong>.</p></div></div>
+      <div class="view-header"><div><h1>LLM Attack Builder</h1><p class="view-sub">Pick model-safety techniques (27) and Filter-Layer Probes (12). Session params, categories, and Launch live in the unified <strong>Attack Builder</strong>.</p></div>
+      <button class="btn-secondary" id="btn-manage-custom-tech" style="white-space:nowrap">+ Custom Techniques</button></div>
 
       <!-- Technique selector -->
       <div class="card">
@@ -798,9 +872,21 @@
         <div class="view-header">
           <div><h1>Results &amp; Report</h1><p class="view-sub">Past sessions are persisted locally. Click a session to see its detail report.</p></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn-secondary" id="btn-open-break-library">Break Library</button>
             <button class="btn-secondary" id="btn-clear-sessions">Clear History</button>
           </div>
         </div>
+
+        <!-- Vulnerability trend chart -->
+        <div class="card" id="vuln-trend-card" style="margin-top:14px;display:none">
+          <div class="card-title-row">
+            <span class="card-title">Vulnerability Trend</span>
+            <select id="trend-target-filter" style="font-size:12px;background:var(--bg-2);color:var(--text-1);border:1px solid var(--border);border-radius:4px;padding:3px 6px"><option value="">All targets</option></select>
+          </div>
+          <p class="card-sub" style="margin-bottom:8px">Vuln% (confirmed breaks ÷ total runs) across the last 15 sessions. Filter by target to track a specific model over time.</p>
+          <canvas id="vuln-trend-chart" height="100"></canvas>
+        </div>
+
         <div class="card" style="margin-top:14px">
           <div class="card-title-row"><span class="card-title">Sessions</span><span class="count-badge" id="sessions-count">0 sessions</span></div>
           <div class="results-table-wrap">
@@ -838,8 +924,37 @@
             <select id="results-filter-success"><option value="">All Outcomes</option><option value="break">Breaks</option><option value="defended">Defended</option><option value="filter_blocked">Filter-Blocked</option><option value="pending">Pending</option><option value="error">Errors</option></select>
           </div>
           <div class="results-table-wrap">
-            <table class="results-table"><thead><tr><th>#</th><th>Technique</th><th>Category</th><th>Turns</th><th>Verdict</th><th>Score</th><th>Break@</th><th>Reason</th></tr></thead>
+            <table class="results-table"><thead><tr><th>#</th><th>Technique</th><th>Category</th><th>Turns</th><th>Verdict</th><th title="Severity 5–10 for BREAK runs; — for DEFENDED">Severity</th><th>Break@</th><th>Reason</th></tr></thead>
             <tbody id="results-tbody"><tr><td colspan="8" class="empty-row">No results yet.</td></tr></tbody></table>
+          </div>
+        </div>
+
+        <!-- Inline visual report — same HTML as the exported report, embedded in a sandboxed iframe -->
+        <div id="detail-visual-report-wrap" style="display:none;margin-top:14px">
+          <div class="card-title" style="margin-bottom:8px;font-size:13px;font-weight:600;color:var(--text-2);letter-spacing:.04em">FULL VISUAL REPORT</div>
+          <iframe id="detail-visual-iframe" style="width:100%;min-height:600px;border:none;border-radius:8px;background:#fff"
+                  sandbox="allow-scripts" scrolling="no"></iframe>
+        </div>
+      </div>
+
+      <!-- ── Sub-view C: Break Library ── -->
+      <div id="results-breaks-view" style="display:none">
+        <div class="view-header">
+          <div style="display:flex;align-items:center;gap:12px">
+            <button class="btn-secondary" id="btn-back-from-breaks" style="padding:6px 10px">&larr; Back</button>
+            <div><h1>Break Library</h1><p class="view-sub">All confirmed break conversations — inspect full turns, use as mutation seed for Auto-Tune.</p></div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn-secondary" id="btn-clear-break-library">Clear Library</button>
+          </div>
+        </div>
+        <div class="card" style="margin-top:14px">
+          <div class="card-title-row"><span class="card-title">Saved Breaks</span><span class="count-badge" id="breaks-count">0 breaks</span></div>
+          <div class="results-table-wrap">
+            <table class="results-table">
+              <thead><tr><th>#</th><th>Date</th><th>Technique</th><th>Category</th><th>Target</th><th>Turns</th><th title="Severity 5–10">Severity</th><th>Actions</th></tr></thead>
+              <tbody id="breaks-tbody"><tr><td colspan="8" class="empty-row">No breaks saved yet.</td></tr></tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -888,6 +1003,19 @@
         <div class="autotune-section">
           <div class="autotune-section-title">Recent lessons (auto-distilled from past sessions)</div>
           <div id="autotune-lessons" class="autotune-list"><div class="autotune-empty">no lessons yet</div></div>
+        </div>
+      </div>
+
+      <!-- Technique effectiveness leaderboard -->
+      <div class="card" id="leaderboard-card" style="margin-top:14px">
+        <div class="card-title">Technique Effectiveness Leaderboard</div>
+        <p class="card-sub" style="margin-bottom:10px">Aggregated break rates per technique across all sessions and targets. Requires Auto-Tune to be enabled and at least one evaluated session.</p>
+        <div id="leaderboard-empty" style="color:var(--text-3);font-size:12px;padding:8px 0">No data yet — enable Auto-Tune and run evaluated sessions to populate.</div>
+        <div class="results-table-wrap" style="display:none" id="leaderboard-table-wrap">
+          <table class="results-table">
+            <thead><tr><th>#</th><th>Technique</th><th>Break Rate</th><th>Breaks/Attempts</th><th>Avg Score</th></tr></thead>
+            <tbody id="leaderboard-tbody"></tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -1225,6 +1353,119 @@
       </div>
     </div>
     <div class="modal-actions"><button class="btn-secondary" id="manage-pricing-close">Close</button></div>
+  </div>
+</div>
+
+<!-- Custom Technique Builder modal -->
+<div class="modal-overlay" id="custom-tech-modal" style="display:none">
+  <div class="modal ct-modal">
+
+    <!-- Header -->
+    <div class="ct-modal-head">
+      <div class="ct-head-icon">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2 L14.35 8.76 L21.51 8.91 L15.8 13.24 L17.88 20.09 L12 16 L6.12 20.09 L8.2 13.24 L2.49 8.91 L9.65 8.76 Z" fill="currentColor"/>
+        </svg>
+      </div>
+      <div class="ct-head-text">
+        <div class="ct-head-title">Custom Techniques</div>
+        <div class="ct-head-sub">Build reusable attack strategies for the red team LLM</div>
+      </div>
+      <button class="ct-close-x" id="custom-tech-modal-close">✕</button>
+    </div>
+
+    <!-- Scrollable body -->
+    <div class="ct-scroll-body">
+
+      <!-- Saved techniques list -->
+      <div class="ct-list-section">
+        <div id="custom-tech-list"></div>
+      </div>
+
+      <!-- Create / Edit form -->
+      <div class="ct-form-section">
+        <div class="ct-form-hdr">
+          <span class="ct-form-hdr-label" id="custom-tech-form-title">New Technique</span>
+          <span class="ct-form-hdr-badge">Custom</span>
+        </div>
+        <input type="hidden" id="custom-tech-edit-id"/>
+
+        <div class="field-group">
+          <label>Technique Name</label>
+          <input type="text" id="custom-tech-name" placeholder="e.g. Socratic Ladder" maxlength="60" autocomplete="off"/>
+        </div>
+
+        <div class="field-group">
+          <label>Red Team System Prompt<span class="label-hint">instructs the attacker LLM each turn</span></label>
+          <textarea id="custom-tech-system" rows="6" placeholder="You are a dialogue writer creating a multi-turn conversation for an AI evaluation benchmark.&#10;Write one message at a time as the 'user' character…" style="font-family:var(--font-mono);font-size:12px"></textarea>
+        </div>
+
+        <div class="ct-two-col">
+          <div class="field-group">
+            <label>Turn Strategy</label>
+            <select id="custom-tech-strategy">
+              <option value="escalate">escalate — gradually intensify</option>
+              <option value="pressure">pressure — sustained direct approach</option>
+              <option value="pivot">pivot — shift framing mid-attack</option>
+              <option value="mosaic">mosaic — fragment across turns</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label>Badge Color</label>
+            <select id="custom-tech-badge">
+              <option value="badge-purple">Purple (default for Custom)</option>
+              <option value="badge-blue">Blue</option>
+              <option value="badge-teal">Teal</option>
+              <option value="badge-coral">Coral</option>
+              <option value="badge-amber">Amber</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label>Description<span class="label-hint">shown in the technique grid</span></label>
+          <input type="text" id="custom-tech-desc" placeholder="Briefly describe this technique's approach" maxlength="200" autocomplete="off"/>
+        </div>
+
+        <div class="field-group">
+          <label>Category Affinity<span class="label-hint">optional — hints the RT toward these categories</span></label>
+          <div id="custom-tech-affinity" class="ct-affinity-grid"></div>
+        </div>
+
+        <div class="field-group" style="margin-bottom:0">
+          <label>Phase Schedule</label>
+          <label class="ct-toggle-row">
+            <input type="checkbox" id="custom-tech-default-phase" checked/>
+            <div class="ct-toggle-row-text">
+              <div class="ct-toggle-title">Use default schedule</div>
+              <div class="ct-toggle-sub">Establish → Introduce → Escalate → Direct (4 phases)</div>
+            </div>
+          </label>
+          <div id="custom-tech-phase-editor" class="ct-phase-editor" style="display:none">
+            <div class="ct-phase-editor-hdr">Custom 2-phase schedule</div>
+            <div class="ct-phase-row">
+              <div class="ct-phase-tag">Establish</div>
+              <input type="text" id="custom-phase-establish" value="Establish context — completely benign and on-topic." autocomplete="off"/>
+            </div>
+            <div class="ct-phase-row">
+              <div class="ct-phase-tag">Direct</div>
+              <input type="text" id="custom-phase-direct" value="Maximum pressure — direct attempt aligned with the evaluation objective." autocomplete="off"/>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div><!-- /ct-scroll-body -->
+
+    <!-- Footer -->
+    <div class="ct-modal-footer">
+      <span id="custom-tech-save-result" class="ct-save-msg"></span>
+      <div class="ct-footer-btns">
+        <button class="btn-secondary" id="btn-cancel-custom-tech">Cancel</button>
+        <button class="btn-primary" id="btn-save-custom-tech">Save Technique</button>
+      </div>
+    </div>
+
   </div>
 </div>
 

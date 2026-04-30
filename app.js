@@ -80,6 +80,22 @@ function clearPricingAll() {
   try { localStorage.removeItem(PRICING_OVERRIDES_KEY); localStorage.removeItem(PRICING_CACHE_KEY); } catch {}
 }
 
+// ─── Custom technique library ───────────────────────────────────────────────
+const CUSTOM_TECHNIQUES_KEY = 'redprobe_custom_techniques_v1';
+let CUSTOM_TECHNIQUES = [];
+function loadCustomTechniques() {
+  try { CUSTOM_TECHNIQUES = JSON.parse(localStorage.getItem(CUSTOM_TECHNIQUES_KEY)) || []; }
+  catch { CUSTOM_TECHNIQUES = []; }
+}
+function saveCustomTechniques() {
+  try { localStorage.setItem(CUSTOM_TECHNIQUES_KEY, JSON.stringify(CUSTOM_TECHNIQUES)); } catch {}
+}
+// Returns the combined technique pool (built-in + custom)
+function allTechniques() {
+  return (typeof TECHNIQUES !== 'undefined' ? TECHNIQUES : []).concat(CUSTOM_TECHNIQUES);
+}
+loadCustomTechniques();
+
 // ─── Settings persistence (Configuration + Settings tabs) ────────────────
 // Two storage layers:
 //   redprobe_settings_v1   — non-secret fields (provider tab + endpoint/model/version/region/etc)
@@ -262,8 +278,9 @@ function setLLMPricingCache(provider, model, inP, outP, confidence) {
 // ── State ─────────────────────────────────────────────────────────────────────
 const S = {
   cfgs: { target: null, eval: null, redteam: null, curl_custom: null },
-  providers: { target:'azure', eval:'azure', redteam:'claude' },
-  connected: { target:false, eval:false, redteam:false, curl_custom:false },
+  providers: { target:'azure', eval:'azure', redteam:'claude', targetB:'openai' },
+  connected: { target:false, eval:false, redteam:false, curl_custom:false, targetB:false },
+  compareMode: false,
   activeChatRole: 'target',
   chatHistories: { target:[], eval:[], redteam:[], curl_custom:[] },
   chatSystemPrompts: { target:'', eval:'', redteam:'', curl_custom:'' },
@@ -474,7 +491,7 @@ loadAutoTuneArchives();
 // stores.
 const SESSIONS_KEY = 'redprobe_sessions_v1';      // legacy localStorage key (migrated then deleted)
 const IDB_NAME     = 'redprobe_db';
-const IDB_VERSION  = 1;
+const IDB_VERSION  = 2;
 const IDB_STORE    = 'sessions';
 
 function _idbOpen() {
@@ -487,10 +504,22 @@ function _idbOpen() {
         const store = db.createObjectStore(IDB_STORE, { keyPath: 'id' });
         store.createIndex('date', 'date', { unique: false });
       }
+      // v2: break conversations store
+      if (!db.objectStoreNames.contains('break_conversations')) {
+        const bc = db.createObjectStore('break_conversations', { keyPath: 'id' });
+        bc.createIndex('ts', 'ts', { unique: false });
+        bc.createIndex('category', 'category', { unique: false });
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror   = () => reject(req.error || new Error('IDB open failed'));
   });
+}
+// Generic helper — opens a tx on any store name
+async function _idbTxStore(storeName, mode) {
+  const db = await _idbOpen();
+  const tx = db.transaction(storeName, mode);
+  return { tx, store: tx.objectStore(storeName), db };
 }
 function _idbTx(mode) {
   return _idbOpen().then(db => {
@@ -535,6 +564,70 @@ async function idbDeleteSession(id) {
     r.onerror   = () => reject(r.error);
   });
 }
+// ─── Break conversation CRUD ──────────────────────────────────────────────────
+async function idbSaveBreakConv(entry) {
+  if (!entry || !entry.id) return;
+  const { store } = await _idbTxStore('break_conversations', 'readwrite');
+  return new Promise((res, rej) => {
+    const r = store.put(entry);
+    r.onsuccess = () => res(true);
+    r.onerror   = () => rej(r.error);
+  });
+}
+async function idbGetBreakConvs() {
+  const { store } = await _idbTxStore('break_conversations', 'readonly');
+  return new Promise((res, rej) => {
+    const r = store.getAll();
+    r.onsuccess = () => res((r.result || []).sort((a, b) => (b.ts || 0) - (a.ts || 0)));
+    r.onerror   = () => rej(r.error);
+  });
+}
+async function idbDeleteBreakConv(id) {
+  const { store } = await _idbTxStore('break_conversations', 'readwrite');
+  return new Promise((res, rej) => {
+    const r = store.delete(id);
+    r.onsuccess = () => res(true);
+    r.onerror   = () => rej(r.error);
+  });
+}
+async function idbClearBreakConvs() {
+  const { store } = await _idbTxStore('break_conversations', 'readwrite');
+  return new Promise((res, rej) => {
+    const r = store.clear();
+    r.onsuccess = () => res(true);
+    r.onerror   = () => rej(r.error);
+  });
+}
+
+// Helper: extract and save break conversations from a set of records to IDB
+function _saveBreakConversationsFromRecords(records) {
+  if (!Array.isArray(records) || !records.length) return;
+  const runMap = new Map();
+  for (const rec of records) {
+    if (!rec.run_id) continue;
+    if (!runMap.has(rec.run_id)) runMap.set(rec.run_id, { verdict: rec.run_verdict, records: [] });
+    runMap.get(rec.run_id).records.push(rec);
+  }
+  for (const [runId, runData] of runMap) {
+    if (runData.verdict !== 'break') continue;
+    const recs = runData.records.slice().sort((a, b) => (a.turn || 0) - (b.turn || 0));
+    const first = recs[0] || {};
+    const entry = {
+      id:              runId,
+      ts:              Date.now(),
+      technique:       first.technique       || '',
+      technique_id:    first.technique_id    || '',
+      category:        first.category        || '',
+      category_id:     first.category_id     || '',
+      intent:          first.intent          || '',
+      target_model:    first.target_model    || '',
+      target_provider: first.target_provider || '',
+      run_score:       first.run_score != null ? first.run_score : null,
+      turns: recs.map(r => ({ turn: r.turn, prompt: r.prompt || '', response: r.response || '' }))
+    };
+    idbSaveBreakConv(entry).catch(() => {});
+  }
+}
 
 // Migrate any legacy localStorage sessions into IDB once, then clear the key.
 async function _migrateLocalStorageSessionsIntoIDB() {
@@ -571,6 +664,46 @@ loadSessionHistory().then(() => {
   // After initial load, refresh any view that reads S.costHistory.
   if (typeof renderCostView   === 'function' && $('view-costs')   && $('view-costs').classList.contains('active'))   renderCostView();
   if (typeof renderSessionsList === 'function' && $('view-results') && $('view-results').classList.contains('active')) renderSessionsList();
+
+  // Auto-recover an interrupted session: if the most recent session has status='running'
+  // and started within the last 2 hours, the page was likely refreshed mid-run.
+  const interrupted = (S.costHistory || []).find(s =>
+    s.status === 'running' &&
+    (Date.now() - new Date(s.date || 0).getTime()) < 2 * 60 * 60 * 1000
+  );
+  if (interrupted) {
+    // Mark as interrupted so it stops showing "RUNNING" in the list
+    interrupted.status = 'interrupted';
+    saveSessionHistoryEntry(interrupted).catch(() => {});
+    // Navigate to Results → session detail so the recovered records are visible
+    if (typeof navigateToView === 'function') navigateToView('results');
+    if (typeof loadSessionDetail === 'function') loadSessionDetail(interrupted);
+    // Show a recovery notification — deferred so the DOM is ready
+    setTimeout(() => {
+      const count = (interrupted.records || []).length;
+      if (typeof showModal === 'function') {
+        showModal(
+          'Session Recovered',
+          `"${interrupted.sessionName || 'Unnamed'}" was interrupted during an active run.\n\n` +
+          `${count} record${count === 1 ? '' : 's'} recovered from the last checkpoint.\n\n` +
+          `You can evaluate or export these records. Click "Restore Config" to pre-fill the Attack Builder with the same technique/category/parameter selections — then add API keys and launch a new session to continue.`
+        );
+        // Inject Restore Config button into modal actions
+        const actions = document.querySelector('#modal-overlay .modal-actions');
+        if (actions && !actions.querySelector('#btn-modal-restore')) {
+          const btn = document.createElement('button');
+          btn.id = 'btn-modal-restore';
+          btn.className = 'btn-primary';
+          btn.textContent = 'Restore Config';
+          btn.addEventListener('click', () => {
+            $('modal-overlay').style.display = 'none';
+            restoreSessionConfig(interrupted);
+          });
+          actions.insertBefore(btn, actions.firstChild);
+        }
+      }
+    }, 400);
+  }
 });
 
 const $ = id => document.getElementById(id);
@@ -588,6 +721,52 @@ $('sidebar-expand').addEventListener('click', () => {
   $('app').classList.add('sidebar-open');
   $('sidebar-expand').style.display = 'none';
 });
+
+// ── Session config restore (resume after crash) ───────────────────────────────
+function restoreSessionConfig(session) {
+  if (!session) return;
+  // Restore technique selections
+  S.selectedTechniques.clear();
+  (session.techniques || []).forEach(id => S.selectedTechniques.add(id));
+  // Restore category selections
+  S.selectedCategories.clear();
+  (session.categories || []).forEach(id => S.selectedCategories.add(id));
+  // Restore numeric parameters
+  const setSlider = (id, val, displayId) => {
+    const el = $(id); if (!el) return;
+    el.value = val;
+    const disp = $(displayId); if (disp) disp.textContent = val;
+  };
+  if (session.cfg_maxTurns)       setSlider('max-turns',        session.cfg_maxTurns,       'turns-val');
+  if (session.cfg_attacksPerTech) setSlider('attacks-per-tech', session.cfg_attacksPerTech, 'attacks-val');
+  if (session.cfg_delay != null)  setSlider('req-delay',        session.cfg_delay,          'delay-val');
+  if (session.cfg_temperature)    setSlider('rt-temp',          session.cfg_temperature,    'temp-val');
+  if (session.cfg_concurrency)    setSlider('concurrency',      session.cfg_concurrency,    'concurrency-val');
+  // Restore intent mode
+  if (session.cfg_intentMode === 'manual') {
+    const mEl = $('intent-manual'); if (mEl) { mEl.checked = true; }
+    const sec = $('intent-manual-section'); if (sec) sec.style.display = '';
+    const ci = $('custom-intent'); if (ci) ci.value = session.cfg_customIntent || '';
+  } else {
+    const aEl = $('intent-auto'); if (aEl) aEl.checked = true;
+    const sec = $('intent-manual-section'); if (sec) sec.style.display = 'none';
+  }
+  // Restore session name
+  const sn = $('session-name'); if (sn) sn.value = (session.sessionName || '') + ' (resumed)';
+  // Re-render grids so UI reflects selections
+  if (typeof renderTechniqueGrid === 'function') renderTechniqueGrid();
+  if (typeof renderCategoryGrid  === 'function') renderCategoryGrid();
+  if (typeof renderPerTechTurns  === 'function') renderPerTechTurns();
+  if (typeof updateAttackBuilderFamilySummary === 'function') updateAttackBuilderFamilySummary();
+  // Navigate to Attack Builder
+  navigateToView('attack-builder');
+  // Show restore banner
+  const el = $('launch-cost-estimate');
+  if (el) {
+    el.style.display = '';
+    el.innerHTML = '<strong style="color:var(--amber)">⚠ Config restored from interrupted session.</strong> Re-enter API keys in Configuration, then launch.';
+  }
+}
 
 // ── View routing ──────────────────────────────────────────────────────────────
 function navigateToView(view) {
@@ -653,7 +832,7 @@ function switchProviderFields(role, provider) {
 }
 
 // Custom model dropdowns
-['target','eval','redteam'].forEach(role => {
+['target','eval','redteam','targetB'].forEach(role => {
   ['openai','claude','hf','az-claude'].forEach(prov => {
     const sel = $(`${role}-model-${prov}`) || $(`${role}-az-claude-model`);
     const selById = $(`${role}-model-${prov}`);
@@ -778,6 +957,10 @@ function buildCfg(role) {
   return baseCfg;
 }
 
+// Build config for Target B — same as buildCfg('targetB') but no RAG/filter/surface.
+// Throws if not configured (same contract as buildCfg).
+function buildTargetBCfg() { return buildCfg('targetB'); }
+
 // v8 — RAG + Surface nav are always visible. The toggle controls whether the
 // builder VIEW shows the real builder content or a "please enable" placeholder.
 
@@ -884,6 +1067,12 @@ async function testRole(role) {
 $('btn-test-target').addEventListener('click',()=>testRole('target'));
 $('btn-test-eval').addEventListener('click',()=>testRole('eval'));
 $('btn-test-redteam').addEventListener('click',()=>testRole('redteam'));
+$('btn-test-targetB') && $('btn-test-targetB').addEventListener('click',()=>testRole('targetB'));
+$('compare-mode-toggle') && $('compare-mode-toggle').addEventListener('change', e => {
+  S.compareMode = e.target.checked;
+  const card = $('target-b-card'); if (card) card.style.display = e.target.checked ? '' : 'none';
+  if (!e.target.checked) { S.connected.targetB = false; }
+});
 
 // ── CURL import ───────────────────────────────────────────────────────────────
 function applyCurlToRole(curlStr, role, resultId) {
@@ -1142,10 +1331,12 @@ $('btn-cat-none').addEventListener('click',()=>{S.selectedCategories.clear();ren
 
 function renderTechniqueGrid() {
   const grid=$('technique-grid'); grid.innerHTML='';
-  TECHNIQUES.forEach(tech => {
+  allTechniques().forEach(tech => {
     const sel=S.selectedTechniques.has(tech.id);
     const card=document.createElement('div'); card.className='technique-card'+(sel?' selected':'');
-    card.innerHTML=`<div class="tech-check">${sel?'✓':''}</div><div class="tech-name">${esc(tech.name)}</div><div class="tech-desc">${esc(tech.description)}</div><div class="tech-tag"><span class="badge ${esc(tech.badge)}">${esc(tech.badgeLabel)}</span></div>`;
+    const badgeClass = tech.custom ? 'badge-purple' : (tech.badge || 'badge-blue');
+    const badgeLbl   = tech.custom ? 'Custom' : (tech.badgeLabel || '');
+    card.innerHTML=`<div class="tech-check">${sel?'✓':''}</div><div class="tech-name">${esc(tech.name)}</div><div class="tech-desc">${esc(tech.description||'')}</div><div class="tech-tag"><span class="badge ${esc(badgeClass)}">${esc(badgeLbl)}</span></div>`;
     card.addEventListener('click',()=>{
       if(S.selectedTechniques.has(tech.id)){S.selectedTechniques.delete(tech.id);card.classList.remove('selected');card.querySelector('.tech-check').textContent='';}
       else{S.selectedTechniques.add(tech.id);card.classList.add('selected');card.querySelector('.tech-check').textContent='✓';}
@@ -1155,8 +1346,8 @@ function renderTechniqueGrid() {
   });
   updateTechCount(); renderPerTechTurns();
 }
-function updateTechCount() { $('tech-selected-count').textContent=`${S.selectedTechniques.size} of ${TECHNIQUES.length} selected`; }
-$('btn-select-all').addEventListener('click',()=>{TECHNIQUES.forEach(t=>S.selectedTechniques.add(t.id));renderTechniqueGrid();});
+function updateTechCount() { $('tech-selected-count').textContent=`${S.selectedTechniques.size} of ${allTechniques().length} selected`; }
+$('btn-select-all').addEventListener('click',()=>{allTechniques().forEach(t=>S.selectedTechniques.add(t.id));renderTechniqueGrid();});
 $('btn-deselect-all').addEventListener('click',()=>{S.selectedTechniques.clear();renderTechniqueGrid();});
 
 // ── Filter-Layer Probes (Phase B) ────────────────────────────────────────────
@@ -1231,6 +1422,7 @@ function updateAttackBuilderFamilySummary() {
     else if (cats === 0)          summary.textContent = `${totalProbes} probes selected — pick at least one Attack Category.`;
     else                          summary.textContent = `${totalProbes} probes × ${cats} categories = ${totalProbes*cats} attack jobs. Ready.`;
   }
+  updateCostEstimate();
 }
 
 // Hook into existing renderers so the summary stays current.
@@ -1378,7 +1570,7 @@ updateSurfaceLaunchSummary();
 
 function renderPerTechTurns() {
   const grid=$('per-tech-turns-grid'); if(!grid) return;
-  const selected=TECHNIQUES.filter(t=>S.selectedTechniques.has(t.id));
+  const selected=allTechniques().filter(t=>S.selectedTechniques.has(t.id));
   if(!selected.length){grid.innerHTML='<span style="color:var(--text-3);font-size:12px">Select techniques above.</span>';return;}
   grid.innerHTML='';
   selected.forEach(tech=>{
@@ -1517,7 +1709,7 @@ $('btn-start-rag-attack') && $('btn-start-rag-attack').addEventListener('click',
 
 ['max-turns','attacks-per-tech','req-delay','rt-temp','concurrency'].forEach(id=>{
   const m={'max-turns':'turns-val','attacks-per-tech':'attacks-val','req-delay':'delay-val','rt-temp':'temp-val','concurrency':'concurrency-val'};
-  const el=$(id); if(el) el.addEventListener('input',e=>{const out=$(m[id]); if(out) out.textContent=e.target.value;});
+  const el=$(id); if(el) el.addEventListener('input',e=>{const out=$(m[id]); if(out) out.textContent=e.target.value; updateCostEstimate();});
 });
 document.querySelectorAll('input[name="intent-mode"]').forEach(r=>r.addEventListener('change',()=>{const manual=$('intent-manual').checked;$('intent-manual-section').style.display=manual?'':'none';}));
 
@@ -1526,7 +1718,7 @@ $('btn-preview-attack').addEventListener('click',async()=>{
   if(isManual){prev.textContent=val('custom-intent')||'(no intent)';prev.style.display='';return;}
   let rtCfg; try{rtCfg=buildCfg('redteam');}catch(e){prev.textContent='Configure Red Team first.';prev.style.display='';return;}
   prev.textContent='Generating…'; prev.style.display='';
-  const tech=TECHNIQUES.find(t=>S.selectedTechniques.has(t.id))||TECHNIQUES[0];
+  const tech=allTechniques().find(t=>S.selectedTechniques.has(t.id))||TECHNIQUES[0];
   const cat=[...S.selectedCategories][0]||Object.keys(ATTACK_CATEGORIES)[0];
   const dummy=new RedTeamAttacker({rtCfg,tgtCfg:{}});
   const intent=await dummy.generateIntent(cat,tech).catch(e=>'Error: '+e.message);
@@ -1588,7 +1780,7 @@ $('btn-start-attack').addEventListener('click',async()=>{
   const customIntent=isManual?val('custom-intent'):null;
   const parallelEval=$('parallel-eval-toggle').checked;
 
-  const techniques=TECHNIQUES.filter(t=>S.selectedTechniques.has(t.id)).map(t=>({...t,customTurns:S.perTechTurns[t.id]||0}));
+  const techniques=allTechniques().filter(t=>S.selectedTechniques.has(t.id)).map(t=>({...t,customTurns:S.perTechTurns[t.id]||0}));
   const categories=[...S.selectedCategories];
 
   // Setup parallel evaluator if enabled
@@ -1596,7 +1788,7 @@ $('btn-start-attack').addEventListener('click',async()=>{
   if(parallelEval&&S.connected.eval){
     try {
       const evalCfg=buildCfg('eval');
-      parallelEvaluator=new AttackEvaluator({ evalCfg, delay:600, onProgress:()=>{} });
+      parallelEvaluator=new AttackEvaluator({ evalCfg, delay:200, onProgress:()=>{} });
     } catch(e){ addLogEntry({type:'system',message:'Parallel eval not available: '+e.message,technique:'System'}); }
   }
 
@@ -1607,7 +1799,7 @@ $('btn-start-attack').addEventListener('click',async()=>{
   let attackerEvalCfg = null;
   try { attackerEvalCfg = S.connected.eval ? buildCfg('eval') : null; } catch { attackerEvalCfg = null; }
 
-  const concurrency = parseInt(val('concurrency')) || 1;
+  const concurrency = parseInt(val('concurrency')) || 4;
 
   // Auto-tune state — gated by breakArchiveEnabled. Empty objects when disabled.
   const tgtKey = targetCfgKeyOf(tgtCfg);
@@ -1623,7 +1815,20 @@ $('btn-start-attack').addEventListener('click',async()=>{
     concurrency,
     onLog:e=>addLogEntry(e),
     onMetric:t=>{if(t==='turns')S.metrics.turns++;else if(t==='responses')S.metrics.responses++;else if(t==='techniques_done')S.metrics.done++;updateMetrics();},
-    onRecord:r=>{S.allRecords.push(r);if(r.error_type)S.metrics.errors++;appendResultRow(r);updateMetrics();},
+    onRecord: r => {
+      if (S.compareMode) r = { ...r, target_label: 'A' };
+      S.allRecords.push(r);
+      if (r.error_type) S.metrics.errors++;
+      appendResultRow(r);
+      updateMetrics();
+      // Checkpoint every 5 records so a refresh loses at most 5 records of progress.
+      // sessionEntry is in the same closure scope.
+      if (S.allRecords.length % 5 === 0) {
+        sessionEntry.records    = S.allRecords.slice();
+        sessionEntry.totalTurns = S.metrics.turns;
+        saveSessionHistoryEntry(sessionEntry).catch(() => {});
+      }
+    },
     onTechniqueComplete: parallelEvaluator
       ? async (techRecords, techName) => {
           const validRecs=techRecords.filter(r=>!r.error_type&&r.eval_outcome==='pending');
@@ -1661,6 +1866,8 @@ $('btn-start-attack').addEventListener('click',async()=>{
                 });
               }
             }
+            // Save any break conversations from this technique batch to the Break Library.
+            _saveBreakConversationsFromRecords(evaluated);
           } catch(e){ addEvalProgress(techName,'error',0,validRecs.length,0,e.message); }
         }
       : ()=>{}
@@ -1668,10 +1875,89 @@ $('btn-start-attack').addEventListener('click',async()=>{
 
   S.running=true; $('btn-stop-attack').style.display='inline-block'; $('running-badge').style.display='inline-flex';
 
-  // Track session metadata for cost view
-  const sessionStart=new Date();
+  // Create session entry BEFORE running so refreshing the page doesn't lose progress.
+  const sessionStart = new Date();
+  const _sessionId   = sessionStart.toISOString() + '-' + Math.random().toString(36).slice(2, 8);
+  const sessionEntry = {
+    id:             _sessionId,
+    sessionName,
+    date:           sessionStart.toISOString(),
+    techniques:     [...S.selectedTechniques],
+    categories:     [...S.selectedCategories],
+    records:        [],
+    targetModel:    tgtCfg.deployment || tgtCfg.model || '',
+    targetProvider: tgtCfg.provider || '',
+    redteamModel:   rtCfg.model || '',
+    redteamProvider: rtCfg.provider || '',
+    totalTurns:  0,
+    totalBreaks: 0,
+    totalRuns:   0,
+    status:      'running',
+    // Config snapshot for session resume after crash
+    cfg_maxTurns:       maxTurns,
+    cfg_attacksPerTech: attacksPerTech,
+    cfg_delay:          delay,
+    cfg_temperature:    temperature,
+    cfg_concurrency:    parseInt(val('concurrency')) || 4,
+    cfg_intentMode:     isManual ? 'manual' : 'auto',
+    cfg_customIntent:   customIntent || '',
+  };
+  S.activeDetailSessionId = _sessionId;
+  saveSessionHistoryEntry(sessionEntry);  // initial IDB write — status = 'running'
+
+  // Incrementally upsert to IDB every 20 s so a mid-run refresh loses at most 20 s.
+  const _progressSaveInterval = setInterval(async () => {
+    if (!S.running) return;
+    sessionEntry.records    = S.allRecords.slice();
+    sessionEntry.totalTurns = S.metrics.turns;
+    try { await saveSessionHistoryEntry(sessionEntry); } catch {}
+  }, 20000);
+
   try{ await S.activeAttacker.runSession({techniques,categories,intentMode:isManual?'manual':'auto',customIntent,attacksPerTechnique:attacksPerTech}); }
   catch(e){ addLogEntry({type:'system',message:'Session error: '+e.message,technique:'System'}); }
+
+  // ── Target B run (comparison mode) ──────────────────────────────────────
+  if (S.compareMode && S.connected.targetB) {
+    let tgtBCfg;
+    try { tgtBCfg = buildTargetBCfg(); } catch(e) {
+      addLogEntry({type:'system',message:`Target B not configured — skipping comparison: ${e.message}`,technique:'System'});
+      tgtBCfg = null;
+    }
+    if (tgtBCfg) {
+      addLogEntry({type:'system',message:`▶ Starting Target B run (${tgtBCfg.provider}/${tgtBCfg.deployment||tgtBCfg.model||'?'})…`,technique:'System'});
+      const tgtBKey = targetCfgKeyOf(tgtBCfg);
+      const attackerB = new RedTeamAttacker({
+        rtCfg, tgtCfg: tgtBCfg, maxTurns, delay, temperature, sessionName: sessionName + ' [B]',
+        evalCfg: attackerEvalCfg,
+        breakArchive: S.breakArchiveEnabled ? S.breakArchive : [],
+        lessonsArchive: S.breakArchiveEnabled ? S.lessonsArchive : {},
+        priorStats: S.breakArchiveEnabled ? S.statsMatrix : {},
+        priorFailures: S.breakArchiveEnabled ? S.failuresArchive : {},
+        priorPayloadStats: S.breakArchiveEnabled ? S.payloadStats : {},
+        targetCfgKey: tgtBKey, concurrency,
+        onLog: e => addLogEntry({ ...e, message: '[B] ' + e.message }),
+        onMetric: t => { if(t==='turns') S.metrics.turns++; else if(t==='responses') S.metrics.responses++; updateMetrics(); },
+        onRecord: r => {
+          const rec = { ...r, target_label: 'B' };
+          S.allRecords.push(rec);
+          if (rec.error_type) S.metrics.errors++;
+          appendResultRow(rec);
+          updateMetrics();
+        },
+        onTechniqueComplete: () => {}
+      });
+      try { await attackerB.runSession({techniques,categories,intentMode:isManual?'manual':'auto',customIntent,attacksPerTechnique:attacksPerTech}); }
+      catch(e) { addLogEntry({type:'system',message:'Target B session error: '+e.message,technique:'System'}); }
+      // Mark session as comparison
+      sessionEntry.isComparison  = true;
+      sessionEntry.targetModelA  = tgtCfg.deployment  || tgtCfg.model  || '';
+      sessionEntry.targetModelB  = tgtBCfg.deployment || tgtBCfg.model || '';
+      sessionEntry.targetLabelA  = `${tgtCfg.provider}/${tgtCfg.deployment||tgtCfg.model||''}`.replace(/^\/|\/$/g,'');
+      sessionEntry.targetLabelB  = `${tgtBCfg.provider}/${tgtBCfg.deployment||tgtBCfg.model||''}`.replace(/^\/|\/$/g,'');
+    }
+  }
+
+  clearInterval(_progressSaveInterval);
 
   S.running=false; $('btn-stop-attack').style.display='none'; $('running-badge').style.display='none';
   const successRecs=S.allRecords.filter(r=>!r.error_type).length;
@@ -1724,31 +2010,21 @@ $('btn-start-attack').addEventListener('click',async()=>{
   // Housekeeping: drop the attacker reference so its closures are GC'd
   S.activeAttacker = null;
 
-  // Save session to cost history (persisted to localStorage; cap at SESSIONS_MAX).
+  // Finalize session entry — upsert to IDB with full records + status = 'complete'.
   const runMap = new Map();
   for (const r of S.allRecords) { if (r.run_id && !runMap.has(r.run_id)) runMap.set(r.run_id, r.run_verdict); }
   const verdicts = [...runMap.values()];
-  const sessionEntry={
-    id: sessionStart.toISOString() + '-' + Math.random().toString(36).slice(2, 8),
-    sessionName, date:sessionStart.toISOString(),
-    techniques:[...S.selectedTechniques],
-    categories:[...S.selectedCategories],
-    records: S.allRecords,
-    targetModel: tgtCfg.deployment||tgtCfg.model||'',
-    targetProvider: tgtCfg.provider||'',
-    redteamModel: rtCfg.model||'',
-    redteamProvider: rtCfg.provider||'',
-    totalTurns: S.metrics.turns,
-    // Run-level breaks count (was inflated per-turn before; now derived from run_verdict).
-    totalBreaks: verdicts.filter(v => v === 'break').length,
-    totalRuns:   verdicts.length
-  };
+  sessionEntry.records     = S.allRecords;
+  sessionEntry.totalTurns  = S.metrics.turns;
+  sessionEntry.totalBreaks = verdicts.filter(v => v === 'break').length;
+  sessionEntry.totalRuns   = verdicts.length;
+  sessionEntry.status      = 'complete';
   S.costHistory.unshift(sessionEntry);
-  // Fire-and-forget the IDB write — UI doesn't block on persistence.
-  saveSessionHistoryEntry(sessionEntry);
-  // The user was on the in-progress detail view ('__current'); upgrade it to
-  // the persisted entry's id so Back returns to a list that includes this row.
-  if (S.activeDetailSessionId === '__current') S.activeDetailSessionId = sessionEntry.id;
+  saveSessionHistoryEntry(sessionEntry);  // final upsert — status = 'complete'
+
+  // Save full break conversations to the Break Library (IDB).
+  _saveBreakConversationsFromRecords(S.allRecords);
+
   $('detail-session-name').textContent = sessionEntry.sessionName;
   const dt = new Date(sessionEntry.date);
   const tgt = `${sessionEntry.targetProvider}/${sessionEntry.targetModel}`.replace(/^\/|\/$/g, '');
@@ -1930,12 +2206,14 @@ function updateMetrics(){
 function _showResultsList() {
   $('results-list-view').style.display = '';
   $('results-detail-view').style.display = 'none';
+  if ($('results-breaks-view')) $('results-breaks-view').style.display = 'none';
   S.activeDetailSessionId = null;
   renderSessionsList();
 }
 function _showResultsDetail() {
   $('results-list-view').style.display = 'none';
   $('results-detail-view').style.display = '';
+  if ($('results-breaks-view')) $('results-breaks-view').style.display = 'none';
 }
 
 function renderSessionsList() {
@@ -1947,6 +2225,7 @@ function renderSessionsList() {
     return;
   }
   tbody.innerHTML = '';
+  const now = Date.now();
   list.forEach((s, i) => {
     const tr = document.createElement('tr');
     tr.style.cursor = 'pointer';
@@ -1958,10 +2237,19 @@ function renderSessionsList() {
     const vuln      = totalRuns ? Math.round((breaks / totalRuns) * 100) : 0;
     const techList  = (s.techniques || []).slice(0, 3).join(', ') + ((s.techniques||[]).length > 3 ? `, +${s.techniques.length - 3}` : '');
     const tgt       = `${s.targetProvider || ''}/${s.targetModel || ''}`.replace(/^\/|\/$/g, '') || '—';
+    // Status badge — 'interrupted' is set by the auto-recovery path; 'running' sessions
+    // older than 5 min are also shown as interrupted (page was refreshed).
+    const ageMs         = now - (isNaN(dt) ? now : dt.getTime());
+    const isRunning     = s.status === 'running' || s.status === 'interrupted';
+    const isInterrupted = s.status === 'interrupted' || (s.status === 'running' && ageMs > 5 * 60 * 1000);
+    const statusBadge   = isRunning
+      ? `<span style="margin-left:6px;font-size:10px;padding:1px 5px;border-radius:4px;background:${isInterrupted?'rgba(251,191,36,0.15)':'rgba(59,130,246,0.15)'};color:${isInterrupted?'var(--amber)':'var(--blue-bright)'};border:1px solid ${isInterrupted?'rgba(251,191,36,0.3)':'rgba(59,130,246,0.3)'};">${isInterrupted ? 'INTERRUPTED' : 'RUNNING'}</span>`
+      : '';
+    if (isRunning) tr.style.opacity = '0.8';
     tr.innerHTML = `
       <td>${i+1}</td>
       <td style="font-size:11px">${dateStr}</td>
-      <td style="font-weight:500;color:var(--text-1)" title="${esc(s.sessionName||'')}">${esc((s.sessionName||'—').substring(0, 50))}</td>
+      <td style="font-weight:500;color:var(--text-1)" title="${esc(s.sessionName||'')}">${esc((s.sessionName||'—').substring(0, 50))}${statusBadge}</td>
       <td style="font-size:11px;color:var(--text-2)" title="${esc(tgt)}">${esc(tgt.substring(0, 30))}</td>
       <td style="font-size:11px;color:var(--text-2)" title="${esc((s.techniques||[]).join(', '))}">${esc(techList)}</td>
       <td style="font-family:var(--font-mono)">${totalRuns}</td>
@@ -1971,6 +2259,149 @@ function renderSessionsList() {
     tr.addEventListener('click', () => loadSessionDetail(s));
     tbody.appendChild(tr);
   });
+
+  renderVulnTrendChart();
+}
+
+// ── Vulnerability trend chart ─────────────────────────────────────────────────
+let _vulnTrendChart = null;
+function renderVulnTrendChart() {
+  const card   = $('vuln-trend-card');
+  const canvas = $('vuln-trend-chart');
+  const filter = $('trend-target-filter');
+  if (!card || !canvas) return;
+
+  const allSessions = (S.costHistory || []).filter(s => s.status === 'complete' || s.status === 'interrupted');
+  if (!allSessions.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+
+  // Populate filter dropdown with distinct targets (preserve selection)
+  const prevFilter = filter ? filter.value : '';
+  const targets = [...new Set(allSessions.map(s =>
+    `${s.targetProvider || ''}/${s.targetModel || ''}`.replace(/^\/|\/$/g, '')).filter(Boolean))];
+  if (filter) {
+    const opts = targets.map(t => `<option value="${esc(t)}"${t===prevFilter?' selected':''}>${esc(t)}</option>`).join('');
+    filter.innerHTML = `<option value="">All targets</option>${opts}`;
+    filter.value = prevFilter;
+  }
+
+  const selectedTarget = filter ? filter.value : '';
+  let sessions = allSessions.slice().sort((a,b) => new Date(a.date||0) - new Date(b.date||0));
+  if (selectedTarget) sessions = sessions.filter(s =>
+    `${s.targetProvider || ''}/${s.targetModel || ''}`.replace(/^\/|\/$/g,'') === selectedTarget);
+  sessions = sessions.slice(-15);
+
+  if (!sessions.length) {
+    if (_vulnTrendChart) { _vulnTrendChart.destroy(); _vulnTrendChart = null; }
+    card.style.display = 'none';
+    return;
+  }
+
+  const labels = sessions.map(s => {
+    const d = new Date(s.date || 0);
+    return isNaN(d) ? '?' : `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  });
+  const data = sessions.map(s => {
+    const runs   = (typeof s.totalRuns === 'number' && s.totalRuns) || 0;
+    const breaks = s.totalBreaks || 0;
+    return runs ? Math.round((breaks / runs) * 100) : 0;
+  });
+
+  if (_vulnTrendChart) { _vulnTrendChart.destroy(); _vulnTrendChart = null; }
+  const ctx = canvas.getContext('2d');
+  _vulnTrendChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Vuln%',
+        data,
+        borderColor: 'rgba(239,68,68,0.85)',
+        backgroundColor: 'rgba(239,68,68,0.10)',
+        fill: true,
+        tension: 0.3,
+        pointRadius: 4,
+        pointBackgroundColor: 'rgba(239,68,68,0.9)',
+        borderWidth: 2
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => `${ctx.parsed.y}%` } }
+      },
+      scales: {
+        x: { ticks: { color: '#44445a', font: { size: 9 }, maxRotation: 40 }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { min: 0, max: 100, ticks: { color: '#44445a', font: { size: 10 }, callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,0.06)' } }
+      }
+    }
+  });
+}
+
+// ── Multi-target comparison table ────────────────────────────────────────────
+function renderComparisonTable(records, session, container) {
+  const labelA = session.targetLabelA || 'Target A';
+  const labelB = session.targetLabelB || 'Target B';
+  const recsA = records.filter(r => r.target_label === 'A');
+  const recsB = records.filter(r => r.target_label === 'B');
+
+  // Group by technique+category+attack_index at the run level
+  const runKey = r => `${r.technique_id||r.technique}||${r.category}||${r.attack_index||0}`;
+  const runsA = {}, runsB = {};
+  for (const r of recsA) {
+    const k = runKey(r);
+    if (!runsA[k] || r.run_verdict) runsA[k] = r;
+  }
+  for (const r of recsB) {
+    const k = runKey(r);
+    if (!runsB[k] || r.run_verdict) runsB[k] = r;
+  }
+  const allKeys = [...new Set([...Object.keys(runsA), ...Object.keys(runsB)])].sort();
+
+  const verdictBadge = v => {
+    if (!v || v === 'pending') return '<span style="color:var(--text-3)">—</span>';
+    const map = { break:'var(--red)', defended:'var(--teal)', filter_blocked:'var(--amber)', partial_filter_blocked:'var(--amber)', error:'var(--text-3)' };
+    return `<span style="font-weight:600;color:${map[v]||'var(--text-2)'}">${(v||'').toUpperCase().replace(/_/g,' ')}</span>`;
+  };
+
+  const rows = allKeys.map(k => {
+    const ra = runsA[k], rb = runsB[k];
+    const [tech, cat] = k.split('||');
+    const va = (ra && ra.run_verdict) || (ra && ra.eval_outcome) || '—';
+    const vb = (rb && rb.run_verdict) || (rb && rb.eval_outcome) || '—';
+    const scoreA = ra && ra.run_score != null ? ra.run_score : (ra && ra.eval_score != null ? ra.eval_score : null);
+    const scoreB = rb && rb.run_score != null ? rb.run_score : (rb && rb.eval_score != null ? rb.eval_score : null);
+    const bothBreak    = va === 'break' && vb === 'break';
+    const bothDefended = va === 'defended' && vb === 'defended';
+    const rowBg = bothBreak ? 'rgba(239,68,68,0.06)' : bothDefended ? 'rgba(34,197,94,0.04)' : 'transparent';
+    return `<tr style="background:${rowBg}">
+      <td style="font-size:11px;color:var(--text-2)">${esc(tech)}</td>
+      <td style="font-size:11px;color:var(--text-2)">${esc(cat)}</td>
+      <td>${verdictBadge(va)}${scoreA!=null?` <span style="font-size:10px;color:var(--text-3)">${scoreA}/10</span>`:''}</td>
+      <td>${verdictBadge(vb)}${scoreB!=null?` <span style="font-size:10px;color:var(--text-3)">${scoreB}/10</span>`:''}</td>
+      <td style="font-size:11px;color:var(--text-3)">${bothBreak?'Both broke':bothDefended?'Both defended':va==='break'&&vb!=='break'?`A only`:vb==='break'&&va!=='break'?`B only`:'—'}</td>
+    </tr>`;
+  }).join('');
+
+  const aBreaks = Object.values(runsA).filter(r => r.run_verdict==='break' || r.eval_outcome==='break').length;
+  const bBreaks = Object.values(runsB).filter(r => r.run_verdict==='break' || r.eval_outcome==='break').length;
+  const aTotal  = Object.keys(runsA).length, bTotal = Object.keys(runsB).length;
+
+  container.innerHTML = `
+    <div class="card-title-row" style="margin-bottom:10px">
+      <span class="card-title">Comparison: ${esc(labelA)} vs ${esc(labelB)}</span>
+      <div style="display:flex;gap:12px;font-size:12px">
+        <span style="color:var(--text-2)"><strong style="color:var(--text-1)">${esc(labelA)}</strong> — ${aBreaks}/${aTotal} breaks (${aTotal?Math.round(aBreaks/aTotal*100):0}%)</span>
+        <span style="color:var(--text-2)"><strong style="color:var(--text-1)">${esc(labelB)}</strong> — ${bBreaks}/${bTotal} breaks (${bTotal?Math.round(bBreaks/bTotal*100):0}%)</span>
+      </div>
+    </div>
+    <div class="results-table-wrap">
+      <table class="results-table">
+        <thead><tr><th>Technique</th><th>Category</th><th>${esc(labelA)}</th><th>${esc(labelB)}</th><th>Delta</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="5" class="empty-row">No evaluated comparison data yet — run evaluation first.</td></tr>'}</tbody>
+      </table>
+    </div>`;
 }
 
 // Render an existing session's records into the detail view, re-using the
@@ -1988,8 +2419,27 @@ function loadSessionDetail(session) {
   $('detail-session-name').textContent = session.sessionName || 'Session';
   const dt = new Date(session.date || 0);
   const dateStr = isNaN(dt) ? '—' : dt.toLocaleString();
-  const tgt = `${session.targetProvider || ''}/${session.targetModel || ''}`.replace(/^\/|\/$/g, '') || '—';
+  const tgt = session.isComparison
+    ? `A: ${session.targetLabelA||'?'} vs B: ${session.targetLabelB||'?'}`
+    : (`${session.targetProvider || ''}/${session.targetModel || ''}`.replace(/^\/|\/$/g, '') || '—');
   $('detail-session-meta').textContent = `${dateStr} · target: ${tgt} · ${(session.techniques||[]).length} technique${(session.techniques||[]).length===1?'':'s'} · ${records.length} records`;
+
+  // Comparison summary card (shown only for comparison sessions)
+  let compCard = $('comparison-summary-card');
+  if (session.isComparison) {
+    if (!compCard) {
+      compCard = document.createElement('div');
+      compCard.id = 'comparison-summary-card';
+      compCard.className = 'card';
+      compCard.style.marginTop = '14px';
+      const chartCard = $('chart-card');
+      if (chartCard && chartCard.parentNode) chartCard.parentNode.insertBefore(compCard, chartCard.nextSibling);
+    }
+    renderComparisonTable(records, session, compCard);
+    compCard.style.display = '';
+  } else if (compCard) {
+    compCard.style.display = 'none';
+  }
 
   // Show the run-grouped table populated with this session's records.
   $('results-tbody').innerHTML = '';
@@ -2025,14 +2475,138 @@ function loadSessionDetail(session) {
   const hasPending = records.some(r => r.eval_outcome === 'pending');
   $('btn-run-eval').style.display = hasPending ? 'inline-flex' : 'none';
 
+  // Inline visual report — embed the full exported-style HTML in a sandboxed iframe.
+  const iframeWrap = $('detail-visual-report-wrap');
+  const iframe     = $('detail-visual-iframe');
+  if (iframeWrap && iframe) {
+    if (evalRecs.length && typeof AttackEvaluator === 'function') {
+      try {
+        const evaluator2 = new AttackEvaluator({ evalCfg: {} });
+        const report2    = evaluator2.generateReport(evalRecs);
+        const m          = session.targetModel || session.targetProvider || 'model';
+        const html       = evaluator2.generateVisualReport(report2, records, m);
+        iframe.srcdoc    = html;
+        iframe.onload    = () => {
+          try { iframe.style.height = (iframe.contentDocument.body.scrollHeight + 32) + 'px'; } catch {}
+        };
+        iframeWrap.style.display = '';
+      } catch {
+        iframeWrap.style.display = 'none';
+      }
+    } else {
+      iframeWrap.style.display = 'none';
+    }
+  }
+
   _showResultsDetail();
 }
 
 $('btn-back-to-sessions').addEventListener('click', _showResultsList);
+document.addEventListener('change', e => { if (e.target.id === 'trend-target-filter') renderVulnTrendChart(); });
 $('btn-clear-sessions').addEventListener('click', async () => {
   if (confirm('Clear all session history? This cannot be undone.')) {
     await clearSessionHistory();
     renderSessionsList();
+  }
+});
+
+// ── Break Library ─────────────────────────────────────────────────────────────
+function _showBreakLibrary() {
+  $('results-list-view').style.display = 'none';
+  $('results-detail-view').style.display = 'none';
+  if ($('results-breaks-view')) $('results-breaks-view').style.display = '';
+  renderBreakLibrary();
+}
+function _showResultsListFromBreaks() {
+  if ($('results-breaks-view')) $('results-breaks-view').style.display = 'none';
+  $('results-list-view').style.display = '';
+  $('results-detail-view').style.display = 'none';
+  renderSessionsList();
+}
+
+async function renderBreakLibrary() {
+  const tbody = $('breaks-tbody'); if (!tbody) return;
+  let convs = [];
+  try { convs = await idbGetBreakConvs(); } catch { convs = []; }
+  const countEl = $('breaks-count');
+  if (countEl) countEl.textContent = `${convs.length} break${convs.length === 1 ? '' : 's'}`;
+  if (!convs.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-row">No breaks saved yet — run an evaluated session to populate the library.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = '';
+  convs.forEach((c, i) => {
+    const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    const dt = new Date(c.ts || 0);
+    const dateStr = isNaN(dt) ? '—' : `${dt.toLocaleDateString()} ${dt.toLocaleTimeString().substring(0,5)}`;
+    const turns   = Array.isArray(c.turns) ? c.turns.length : '—';
+    const sev     = c.run_score != null ? `${c.run_score}/10` : '—';
+    const tgt     = `${c.target_provider || ''}/${c.target_model || ''}`.replace(/^\/|\/$/g, '') || '—';
+    tr.innerHTML = `
+      <td>${i+1}</td>
+      <td style="font-size:11px">${dateStr}</td>
+      <td style="font-size:11px;color:var(--text-1)">${esc((c.technique||'—').substring(0,30))}</td>
+      <td style="font-size:11px;color:var(--text-2)">${esc((c.category||'—').substring(0,25))}</td>
+      <td style="font-size:11px;color:var(--text-2)" title="${esc(tgt)}">${esc(tgt.substring(0,25))}</td>
+      <td style="font-family:var(--font-mono)">${turns}</td>
+      <td style="font-family:var(--font-mono);color:var(--red)">${sev}</td>
+      <td style="display:flex;gap:6px">
+        <button class="btn-xs" data-action="inspect" data-idx="${i}">Inspect</button>
+        <button class="btn-xs" data-action="seed" data-idx="${i}" style="color:var(--blue-bright)">Use as Seed</button>
+        <button class="btn-xs" data-action="delete" data-idx="${i}" style="color:var(--red)">Delete</button>
+      </td>`;
+    // Inline inspect — expand turns on click
+    tr.querySelector('[data-action="inspect"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const conv = convs[i];
+      const turns = (conv.turns || []).map((t, ti) =>
+        `Turn ${t.turn}\n${'─'.repeat(40)}\nPROMPT:\n${t.prompt || '(none)'}\n\nRESPONSE:\n${t.response || '(none)'}`
+      ).join('\n\n' + '═'.repeat(50) + '\n\n');
+      showModal(
+        `Break: ${conv.technique || '?'} · ${conv.category || '?'} · Severity ${conv.run_score != null ? conv.run_score+'/10' : '—'}`,
+        `Intent: ${conv.intent || '—'}\nTarget: ${conv.target_provider}/${conv.target_model}\n\n${turns}`
+      );
+    });
+    // Use as Seed — inject into break archive so Auto-Tune can mutate it
+    tr.querySelector('[data-action="seed"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const conv = convs[i];
+      // Build a full conversation string from break turns as the "fullPrompt"
+      const fullPromptFromConv = (conv.turns || []).map(t => t.prompt).filter(Boolean).join('\n\n---\n\n').substring(0, 4000);
+      const sig = {
+        techId:    conv.technique_id || conv.technique || '',
+        technique: conv.technique || '',
+        category:  conv.category || '',
+        intent:    conv.intent || '',
+        promptHead: fullPromptFromConv.substring(0, 200),
+        fullPrompt: fullPromptFromConv,
+        verdict:   'full_break',
+        score:     conv.run_score || 8,
+        ts:        conv.ts || Date.now()
+      };
+      if (typeof mergeIntoBreakArchive === 'function') {
+        mergeIntoBreakArchive([sig]);
+        if (typeof renderBreakArchivePanel === 'function') renderBreakArchivePanel();
+        showModal('Seeded', `Break conversation added to the archive.\nAuto-Tune will use it as a mutation seed in the next session (enable cross-session learning to activate).`);
+      }
+    });
+    tr.querySelector('[data-action="delete"]').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('Delete this break conversation?')) return;
+      await idbDeleteBreakConv(convs[i].id).catch(() => {});
+      await renderBreakLibrary();
+    });
+    tbody.appendChild(tr);
+  });
+}
+
+$('btn-open-break-library') && $('btn-open-break-library').addEventListener('click', _showBreakLibrary);
+$('btn-back-from-breaks')   && $('btn-back-from-breaks').addEventListener('click',   _showResultsListFromBreaks);
+$('btn-clear-break-library') && $('btn-clear-break-library').addEventListener('click', async () => {
+  if (confirm('Clear all saved break conversations? This cannot be undone.')) {
+    await idbClearBreakConvs().catch(() => {});
+    await renderBreakLibrary();
   }
 });
 
@@ -2057,7 +2631,13 @@ function _renderRunRowVerdict(runTr, record) {
   const lbl = RUN_VERDICT_LABELS[v] || v.toUpperCase().replace(/_/g,' ');
   const cls = RUN_VERDICT_CLASSES[v] || 'outcome-pending';
   runTr.querySelector('.outcome-cell').innerHTML = `<span class="outcome-pill ${cls}">${lbl}</span>`;
-  runTr.querySelector('.score-cell').textContent = record.run_score != null ? `${record.run_score}/10` : '—';
+  // Severity is only meaningful for break runs. DEFENDED rows show '—' so the
+  // same column never shows a confusingly high number for a successful defense.
+  const _sv = record.run_verdict;
+  const _scoreText = (_sv === 'break' && record.run_score != null)
+    ? `${record.run_score}/10`
+    : (_sv === 'defended' ? '—' : (record.run_score != null ? `${record.run_score}/10` : '—'));
+  runTr.querySelector('.score-cell').textContent = _scoreText;
   const bt = runTr.querySelector('.break-turn-cell');
   if (bt) bt.textContent = record.run_break_turn != null ? `T${record.run_break_turn}` : '—';
   const reason = runTr.querySelector('.reason-cell');
@@ -2201,7 +2781,7 @@ $('btn-run-eval').addEventListener('click',async()=>{
   let evalCfg; try{evalCfg=buildCfg('eval');}catch(e){showModal('Evaluator Not Configured',e.message);return;}
   if(!S.connected.eval){showModal('Evaluator Not Connected','Test evaluator in Configuration.');return;}
   const btn=$('btn-run-eval'); btn.disabled=true; btn.textContent='Evaluating…';
-  const evaluator=new AttackEvaluator({evalCfg,delay:800,onProgress:({current,total})=>{btn.textContent=`Evaluating ${current}/${total}…`;}});
+  const evaluator=new AttackEvaluator({evalCfg,delay:300,onProgress:({current,total})=>{btn.textContent=`Evaluating ${current}/${total}…`;}});
   try {
     const evaluated=await evaluator.evaluateAll(evalRecs);
     S.evaluatedRecords=S.allRecords.map(r=>{if(r.eval_outcome!=='pending')return r;const m=evaluated.find(e=>e.timestamp===r.timestamp&&e.turn===r.turn&&e.technique===r.technique);return m||r;});
@@ -2266,7 +2846,7 @@ function renderChart(report){
 // ── Downloads ─────────────────────────────────────────────────────────────────
 $('btn-export-csv').addEventListener('click',()=>{const recs=S.evaluatedRecords.length?S.evaluatedRecords:S.allRecords;if(!recs.length){showModal('No Data','Run a session first.');return;}const m=(S.cfgs.target&&cfgDisplayName(S.cfgs.target))||'model';downloadCSV(recs,`redprobe_raw_${m}_${Date.now()}.csv`);});
 $('btn-export-report').addEventListener('click',()=>{const recs=S.evaluatedRecords.length?S.evaluatedRecords:S.allRecords;if(!recs.length){showModal('No Data','Run a session first.');return;}const evalRecs=recs.filter(r=>r.eval_outcome!=='pending'&&r.eval_outcome!=='error');if(!evalRecs.length){showModal('Evaluation Required','Run evaluation first.');return;}const evaluator=new AttackEvaluator({evalCfg:{}});const report=evaluator.generateReport(evalRecs);const m=(S.cfgs.target&&cfgDisplayName(S.cfgs.target))||'model';downloadHTMLReport(evaluator.generateVisualReport(report,recs,m),`redprobe_report_${m}_${Date.now()}.html`);});
-function showRecordDetail(r){const oc=r.eval_outcome||'pending';const ev=(oc!=='pending'&&oc!=='error')?`\n─── EVALUATION ───\nOutcome: ${oc.toUpperCase()}\nScore:   ${r.eval_score}/10\nReason:  ${r.eval_reasoning}`:(r.error_type?`\n─── ERROR ───\nType: ${r.error_type}\nDetail: ${r.eval_reasoning}`:'\n(Not yet evaluated)');showModal(`${r.technique} · T${r.turn} · #${r.attack_index}`,`SESSION:    ${r.session_name||'—'}\nTECHNIQUE:  ${r.technique}\nCATEGORY:   ${r.category}\nTIMESTAMP:  ${r.timestamp}\nTARGET:     ${r.target_provider}/${r.target_model}\nRED TEAM:   ${r.redteam_provider}/${r.redteam_model}\n\nINTENT:\n${r.intent}\n\n─── PROMPT ───\n${r.prompt}\n\n─── RESPONSE ───\n${r.response||'(none)'}${ev}`);}
+function showRecordDetail(r){const oc=r.eval_outcome||'pending';const scoreDisplay=r.eval_score!=null?`${r.eval_score}/10`:'— (pre-break turn or defended)';const ev=(oc!=='pending'&&oc!=='error')?`\n─── EVALUATION ───\nOutcome: ${oc.toUpperCase()}\nRun:     ${(r.run_verdict||'—').toUpperCase()}\nSeverity:${scoreDisplay}\nReason:  ${r.eval_reasoning}`:(r.error_type?`\n─── ERROR ───\nType: ${r.error_type}\nDetail: ${r.eval_reasoning}`:'\n(Not yet evaluated)');showModal(`${r.technique} · T${r.turn} · #${r.attack_index}`,`SESSION:    ${r.session_name||'—'}\nTECHNIQUE:  ${r.technique}\nCATEGORY:   ${r.category}\nTIMESTAMP:  ${r.timestamp}\nTARGET:     ${r.target_provider}/${r.target_model}\nRED TEAM:   ${r.redteam_provider}/${r.redteam_model}\n\nINTENT:\n${r.intent}\n\n─── PROMPT ───\n${r.prompt}\n\n─── RESPONSE ───\n${r.response||'(none)'}${ev}`);}
 function showModal(title,body){$('modal-title').textContent=title;$('modal-body').textContent=body;$('modal-overlay').style.display='flex';}
 $('modal-close').addEventListener('click',()=>$('modal-overlay').style.display='none');
 $('modal-overlay').addEventListener('click',e=>{if(e.target.id==='modal-overlay')$('modal-overlay').style.display='none';});
@@ -2329,6 +2909,48 @@ function calcSessionCost(session) {
   }
 
   return { totalTokens, totalCost, byModel, byTechnique, missingPricing };
+}
+
+// ── Pre-launch cost + time estimate ──────────────────────────────────────
+// Returns { totalAttacks, totalTurns, totalCostEst, tgtLabel, rtLabel, timeMinEst, hasPricing }
+function calcPreLaunchEstimate(tgtCfg, rtCfg, techniqueCount, categoryCount, attacksPerTech, maxTurns, concurrency, delayMs) {
+  const totalAttacks = techniqueCount * categoryCount * attacksPerTech;
+  const totalTurns   = totalAttacks * maxTurns;
+  // Conservative per-turn token estimates (mirrors calcSessionCost heuristics)
+  const TGT_IN = 500, TGT_OUT = 300, RT_IN = 800, RT_OUT = 200;
+  const tgtPrice = tgtCfg ? getModelPricing(tgtCfg.provider, tgtCfg.deployment || tgtCfg.model || '') : { in:0, out:0, source:'unknown', label:'?' };
+  const rtPrice  = rtCfg  ? getModelPricing(rtCfg.provider,  rtCfg.deployment  || rtCfg.model  || '') : { in:0, out:0, source:'unknown', label:'?' };
+  const tgtCostEst = (TGT_IN * totalTurns / 1e6) * (tgtPrice.in || 0) + (TGT_OUT * totalTurns / 1e6) * (tgtPrice.out || 0);
+  const rtCostEst  = (RT_IN  * totalTurns / 1e6) * (rtPrice.in  || 0) + (RT_OUT  * totalTurns / 1e6) * (rtPrice.out  || 0);
+  const totalCostEst = tgtCostEst + rtCostEst;
+  const avgLatency = 1.5; // seconds per turn (rough)
+  const timeMinEst = totalTurns > 0 ? (totalTurns * ((delayMs / 1000) + avgLatency)) / Math.max(1, concurrency) / 60 : 0;
+  const hasPricing = (tgtPrice.source !== 'unknown') && (rtPrice.source !== 'unknown');
+  return { totalAttacks, totalTurns, totalCostEst, tgtLabel: tgtPrice.label, rtLabel: rtPrice.label, timeMinEst, hasPricing };
+}
+
+function updateCostEstimate() {
+  const el = $('launch-cost-estimate'); if (!el) return;
+  const techniqueCount = (S.selectedTechniques ? S.selectedTechniques.size : 0)
+    + (S.selectedFilterProbes ? S.selectedFilterProbes.size : 0)
+    + (S.selectedRagTechniques ? S.selectedRagTechniques.size : 0)
+    + (S.selectedSurfaceProbes ? S.selectedSurfaceProbes.size : 0);
+  const categoryCount = S.selectedCategories ? S.selectedCategories.size : 0;
+  if (techniqueCount === 0 || categoryCount === 0) { el.style.display='none'; return; }
+  const attacksPerTech = parseInt(val('attacks-per-tech')) || 3;
+  const maxTurns       = parseInt(val('max-turns'))        || 10;
+  const concurrency    = parseInt(val('concurrency'))      || 4;
+  const delayMs        = parseInt(val('req-delay'))        || 200;
+  let tgtCfg = null, rtCfg = null;
+  try { tgtCfg = buildCfg('target'); } catch { /* not configured yet */ }
+  try { rtCfg  = buildCfg('redteam'); } catch { /* not configured yet */ }
+  const e = calcPreLaunchEstimate(tgtCfg, rtCfg, techniqueCount, categoryCount, attacksPerTech, maxTurns, concurrency, delayMs);
+  const costStr = e.hasPricing ? `~$${e.totalCostEst.toFixed(2)}` : '~$? (pricing unknown)';
+  const timeStr = e.timeMinEst >= 60
+    ? `~${(e.timeMinEst/60).toFixed(1)}h`
+    : `~${Math.ceil(e.timeMinEst)}min`;
+  el.style.display = '';
+  el.innerHTML = `<span style="color:var(--text-3);font-size:12px">Est:</span> <strong style="font-family:var(--font-mono);color:var(--blue-bright)">${costStr}</strong> <span style="color:var(--text-3)">·</span> <strong style="font-family:var(--font-mono)">${timeStr}</strong> <span style="color:var(--text-3)">· ${e.totalAttacks.toLocaleString()} attacks · ${e.totalTurns.toLocaleString()} turns</span>${!e.hasPricing ? ' <span style="color:var(--amber);font-size:11px">(set pricing in Costs view for accurate estimate)</span>' : ''}`;
 }
 
 // ── Costs view: list + detail rendering ─────────────────────────────────
@@ -2703,6 +3325,69 @@ function renderAutoTunePanel() {
       ? lessons.slice(0, 3).map(l => `<div class="autotune-row"><span class="autotune-label">${esc(l.techId)}</span><span class="autotune-stat" style="font-size:11px;color:var(--text-2);text-align:right;max-width:60%">${esc(l.text.substring(0, 110))}${l.text.length>110?'…':''}</span></div>`).join('')
       : '<div class="autotune-empty">no lessons yet</div>';
   }
+
+  renderTechniqueLeaderboard();
+}
+
+// ── Technique effectiveness leaderboard ──────────────────────────────────────
+function renderTechniqueLeaderboard() {
+  const tbody = $('leaderboard-tbody');
+  const empty = $('leaderboard-empty');
+  if (!tbody) return;
+
+  // Aggregate statsMatrix by techId, summing across all category × target combos
+  const byTech = {};
+  for (const [key, v] of Object.entries(S.statsMatrix || {})) {
+    const techId = key.split('||')[0];
+    const cur = byTech[techId] || { techId, attempts: 0, breaks: 0, totalScore: 0, scoredCount: 0 };
+    cur.attempts   += (v.attempts || 0);
+    cur.breaks     += (v.breaks   || 0);
+    cur.totalScore += (v.avgScore || 0) * (v.attempts || 0);
+    cur.scoredCount += (v.attempts || 0);
+    byTech[techId] = cur;
+  }
+
+  const rows = Object.values(byTech).filter(r => r.attempts >= 1);
+  rows.sort((a, b) => {
+    const rA = a.attempts ? a.breaks / a.attempts : 0;
+    const rB = b.attempts ? b.breaks / b.attempts : 0;
+    return rB - rA || b.attempts - a.attempts;
+  });
+
+  const wrap = $('leaderboard-table-wrap');
+  if (!rows.length) {
+    tbody.innerHTML = '';
+    if (empty) empty.style.display = '';
+    if (wrap) wrap.style.display = 'none';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  if (wrap) wrap.style.display = '';
+
+  const allTech = [...(typeof TECHNIQUES !== 'undefined' ? TECHNIQUES : []),
+                   ...(typeof CUSTOM_TECHNIQUES !== 'undefined' ? CUSTOM_TECHNIQUES : [])];
+  tbody.innerHTML = rows.map((r, i) => {
+    const techObj = allTech.find(t => t.id === r.techId);
+    const name    = techObj ? techObj.name : r.techId;
+    const rate    = r.attempts ? Math.round((r.breaks / r.attempts) * 100) : 0;
+    const avgScore = r.scoredCount ? (r.totalScore / r.scoredCount).toFixed(1) : '—';
+    const barWidth = rate;
+    const barColor = rate >= 50 ? 'var(--red)' : rate >= 25 ? 'var(--amber)' : 'var(--blue-bright)';
+    return `<tr>
+      <td style="font-family:var(--font-mono);color:var(--text-3)">${i+1}</td>
+      <td style="font-weight:600">${esc(name)}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:80px;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden">
+            <div style="width:${barWidth}%;height:100%;background:${barColor};border-radius:3px"></div>
+          </div>
+          <span style="font-family:var(--font-mono);font-weight:600;color:${barColor}">${rate}%</span>
+        </div>
+      </td>
+      <td style="font-family:var(--font-mono)">${r.breaks}/${r.attempts}</td>
+      <td style="font-family:var(--font-mono);color:var(--text-2)">${avgScore}</td>
+    </tr>`;
+  }).join('');
 }
 $('btn-reset-autotune') && $('btn-reset-autotune').addEventListener('click', () => {
   if (confirm('Reset all auto-tune learning data (lessons, stats, failures, payload weights)?')) {
@@ -2711,6 +3396,149 @@ $('btn-reset-autotune') && $('btn-reset-autotune').addEventListener('click', () 
   }
 });
 renderAutoTunePanel();
+
+// ── Custom Technique Builder ──────────────────────────────────────────────────
+function openCustomTechModal(editId) {
+  const modal = $('custom-tech-modal'); if (!modal) return;
+  // Populate category affinity checkboxes
+  const affDiv = $('custom-tech-affinity');
+  if (affDiv && typeof ATTACK_CATEGORIES !== 'undefined') {
+    affDiv.innerHTML = Object.entries(ATTACK_CATEGORIES).map(([id, label]) =>
+      `<label class="ct-affinity-pill"><input type="checkbox" class="ct-affinity-cb" data-cat="${esc(id)}"/>${esc(label)}</label>`
+    ).join('');
+  }
+  // Pre-fill form if editing
+  if (editId) {
+    const tech = CUSTOM_TECHNIQUES.find(t => t.id === editId);
+    if (tech) {
+      $('custom-tech-edit-id').value = editId;
+      $('custom-tech-name').value    = tech.name || '';
+      $('custom-tech-system').value  = tech.system || '';
+      $('custom-tech-strategy').value = tech.turn_strategy || 'escalate';
+      $('custom-tech-badge').value   = tech.badge || 'badge-purple';
+      $('custom-tech-desc').value    = tech.description || '';
+      $('custom-tech-form-title').textContent = 'Edit Technique';
+      // Restore affinity checkboxes
+      const aff = tech.category_affinity || [];
+      affDiv && affDiv.querySelectorAll('.ct-affinity-cb').forEach(cb => {
+        if (aff.includes(cb.dataset.cat)) cb.checked = true;
+      });
+      // Phase schedule
+      const hasCustomPhase = tech.phase_schedule && Array.isArray(tech.phase_schedule.phases) && tech.phase_schedule.phases.length === 2;
+      $('custom-tech-default-phase').checked = !hasCustomPhase;
+      $('custom-tech-phase-editor').style.display = hasCustomPhase ? '' : 'none';
+      if (hasCustomPhase) {
+        $('custom-phase-establish').value = tech.phase_schedule.phases[0].instruction || '';
+        $('custom-phase-direct').value    = tech.phase_schedule.phases[1].instruction || '';
+      }
+    }
+  } else {
+    // Reset form
+    $('custom-tech-edit-id').value = '';
+    $('custom-tech-name').value    = '';
+    $('custom-tech-system').value  = '';
+    $('custom-tech-strategy').value = 'escalate';
+    $('custom-tech-badge').value   = 'badge-purple';
+    $('custom-tech-desc').value    = '';
+    $('custom-tech-default-phase').checked = true;
+    $('custom-tech-phase-editor').style.display = 'none';
+    $('custom-tech-form-title').textContent = 'New Technique';
+    $('custom-tech-save-result').textContent = '';
+  }
+  renderCustomTechList();
+  modal.style.display = 'flex';
+}
+
+function renderCustomTechList() {
+  const el = $('custom-tech-list'); if (!el) return;
+  if (!CUSTOM_TECHNIQUES.length) {
+    el.innerHTML = '<p class="ct-list-empty">No custom techniques yet — create one below.</p>';
+    return;
+  }
+  el.innerHTML = '<div class="ct-list-hdr">Saved custom techniques</div>' +
+    CUSTOM_TECHNIQUES.map(t =>
+      `<div class="ct-list-item">
+        <span class="badge ${esc(t.badge||'badge-purple')}">${esc(t.badgeLabel||'CT')}</span>
+        <div style="flex:1;min-width:0">
+          <div class="ct-list-name">${esc(t.name)}</div>
+          <div class="ct-list-meta">${esc(t.turn_strategy||'escalate')}${(t.category_affinity||[]).length ? ` · ${t.category_affinity.length} affinit${t.category_affinity.length===1?'y':'ies'}` : ''}</div>
+        </div>
+        <div class="ct-list-btns">
+          <button class="ct-icon-btn ct-edit-btn" data-id="${esc(t.id)}">Edit</button>
+          <button class="ct-icon-btn danger ct-del-btn" data-id="${esc(t.id)}">Delete</button>
+        </div>
+      </div>`
+    ).join('');
+  el.querySelectorAll('.ct-edit-btn').forEach(b => b.addEventListener('click', () => openCustomTechModal(b.dataset.id)));
+  el.querySelectorAll('.ct-del-btn').forEach(b => b.addEventListener('click', () => {
+    if (!confirm(`Delete custom technique "${(CUSTOM_TECHNIQUES.find(t=>t.id===b.dataset.id)||{}).name}"?`)) return;
+    const idx = CUSTOM_TECHNIQUES.findIndex(t => t.id === b.dataset.id);
+    if (idx >= 0) { S.selectedTechniques.delete(b.dataset.id); CUSTOM_TECHNIQUES.splice(idx, 1); saveCustomTechniques(); }
+    renderCustomTechList();
+    renderTechniqueGrid();
+    updateAttackBuilderFamilySummary();
+  }));
+}
+
+$('btn-manage-custom-tech') && $('btn-manage-custom-tech').addEventListener('click', () => openCustomTechModal());
+$('custom-tech-modal-close') && $('custom-tech-modal-close').addEventListener('click', () => { $('custom-tech-modal').style.display='none'; });
+$('btn-cancel-custom-tech') && $('btn-cancel-custom-tech').addEventListener('click', () => {
+  $('custom-tech-edit-id').value = '';
+  $('custom-tech-form-title').textContent = 'New Technique';
+  $('custom-tech-save-result').textContent = '';
+  ['custom-tech-name','custom-tech-system','custom-tech-desc'].forEach(id => { const el=$(id); if(el) el.value=''; });
+  $('custom-tech-default-phase').checked = true;
+  $('custom-tech-phase-editor').style.display = 'none';
+});
+$('custom-tech-default-phase') && $('custom-tech-default-phase').addEventListener('change', e => {
+  $('custom-tech-phase-editor').style.display = e.target.checked ? 'none' : '';
+});
+$('btn-save-custom-tech') && $('btn-save-custom-tech').addEventListener('click', () => {
+  const name   = ($('custom-tech-name').value || '').trim();
+  const system = ($('custom-tech-system').value || '').trim();
+  const result = $('custom-tech-save-result');
+  if (!name)   { result.textContent = 'Name is required.'; result.style.color='var(--red)'; return; }
+  if (!system) { result.textContent = 'System prompt is required.'; result.style.color='var(--red)'; return; }
+  const editId   = $('custom-tech-edit-id').value;
+  const affinity = Array.from($('custom-tech-affinity').querySelectorAll('.ct-affinity-cb:checked')).map(c => c.dataset.cat);
+  const useDefault = $('custom-tech-default-phase').checked;
+  const phase_schedule = useDefault ? null : {
+    phases: [
+      { name:'ESTABLISH', fromPct:0.00, toPct:0.50, instruction: ($('custom-phase-establish').value||'').trim() || 'Establish context.' },
+      { name:'DIRECT',    fromPct:0.50, toPct:1.01, instruction: ($('custom-phase-direct').value||'').trim()    || 'Direct attempt.' }
+    ]
+  };
+  const tech = {
+    id:               editId || `custom_${Date.now()}`,
+    name:             SEC.sanitize(name, 60),
+    description:      SEC.sanitize(($('custom-tech-desc').value||'').trim(), 200),
+    system:           SEC.sanitize(system, 8000),
+    turn_strategy:    $('custom-tech-strategy').value || 'escalate',
+    badge:            $('custom-tech-badge').value || 'badge-purple',
+    badgeLabel:       'Custom',
+    category_affinity: affinity,
+    custom:           true,
+    ...(phase_schedule ? { phase_schedule } : {})
+  };
+  if (editId) {
+    const idx = CUSTOM_TECHNIQUES.findIndex(t => t.id === editId);
+    if (idx >= 0) CUSTOM_TECHNIQUES[idx] = tech;
+    else CUSTOM_TECHNIQUES.push(tech);
+  } else {
+    CUSTOM_TECHNIQUES.push(tech);
+  }
+  saveCustomTechniques();
+  renderCustomTechList();
+  renderTechniqueGrid();
+  updateAttackBuilderFamilySummary();
+  $('custom-tech-edit-id').value = '';
+  $('custom-tech-form-title').textContent = 'New Technique';
+  result.textContent = editId ? 'Technique updated.' : 'Technique saved.';
+  result.style.color = 'var(--teal)';
+  ['custom-tech-name','custom-tech-system','custom-tech-desc'].forEach(id => { const el=$(id); if(el) el.value=''; });
+  $('custom-tech-default-phase').checked = true;
+  $('custom-tech-phase-editor').style.display = 'none';
+});
 // (Old global RT/Target pricing dropdowns removed — pricing is now per-record-model
 // resolved via getModelPricing(). The Manage Pricing modal handles overrides.)
 
