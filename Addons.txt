@@ -1,0 +1,126 @@
+ PART B: New Features to Build (Patent-Forward R&D)
+
+ B1. Refusal Boundary Mapper (RBM)
+
+ Core claim: A method for systematically locating the "refusal boundary" — the topic-depth threshold at which a target LLM transitions
+ from compliant to refusing — using binary-search-style bisection across a severity dimension. Given an intent, the system generates
+ prompts at 10 severity levels, binary-searches to find the exact turn severity at which refusal first occurs, and repeats across N
+ attack categories, producing a topological refusal boundary map: a 2D heatmap of (category × severity) threshold contours.
+
+ Why novel: All existing red-team tools produce pass/fail records at fixed severity levels. No tool maps the continuous threshold
+ surface. The bisection algorithm applied to semantic severity space is novel.
+
+ Implementation sketch:
+ - Add refusalBoundaryProbe(category, technique, intent) in attacker.js
+ - Generate prompts at severity 1–10 using existing crescendo technique framing
+ - Binary search: probe mid-point severity, classify, recurse
+ - Store boundary map in session results
+ - Render as threshold-contour heatmap in evaluator.js report
+ - New UI section: "Refusal Boundary Map" in Results view
+
+ Files to modify: attacker.js, evaluator.js, app.js, index.html, styles.css
+
+ ---
+ B2. Cross-Version Differential Safety Analysis
+
+ Core claim: A method for structured comparison of two target LLM configurations (e.g., model v1 vs. v2, with/without system prompt,
+ before/after safety fine-tuning) using identical attack sets, producing a differential safety report: a matrix of (vulnerability class ×
+  configuration) showing which vulnerabilities appeared, disappeared, or changed severity between versions. Includes regression-score
+ delta, new vulnerability count, and hardened vulnerability count.
+
+ Why novel: No existing red-team tool supports structured A/B comparison of model configurations with a diff-based vulnerability report.
+ This is a unique product feature for organizations doing model versioning.
+
+ Implementation sketch:
+ - Add "Compare Mode" toggle in Configuration view
+ - Allow a second target configuration (Target B)
+ - After session, run identical attack set against both targets in parallel
+ - evaluator.js: compute diff report comparing outcome distributions
+ - New report section: "Differential Safety Analysis" with delta table and regression ring
+
+ Files to modify: app.js, attacker.js, evaluator.js, index.html, styles.css
+
+ ---
+ B3. Constitutional Inconsistency Enumerator (CIE)
+
+ Core claim: A method for automatically discovering semantic-equivalence inconsistencies in an LLM's safety policy application:
+ generating N paraphrases of the same harmful intent (varying persona, framing, register, and linguistic structure) and cataloging pairs
+ where one phrasing is refused and the semantically equivalent other is complied with. Produces a "constitutional inconsistency map"
+ showing which framing dimensions (persona/register/structure) are exploitation vectors for a given model's policy.
+
+ Why novel: Existing tools generate diverse attacks to find breaks. None systematically look for policy inconsistency itself — where the
+ model refuses equivalent-meaning prompts in different ways. This is a novel class of safety finding.
+
+ Implementation sketch:
+ - Add generateSemanticVariants(intent, n=8) in attacker.js using RT LLM
+ - Run all variants against target, collect outcomes
+ - Evaluate pairs with evaluator to detect compliant/refused pairs
+ - Compute inconsistency score = (compliant variants / total variants)
+ - New report section: "Constitutional Inconsistencies" with pair table and exploitation framing analysis
+
+ Files to modify: attacker.js, evaluator.js, app.js, index.html
+
+ ---
+ B4. Causal Turn Attribution Engine (CTA)
+
+ Core claim: After a successful multi-turn break is confirmed by the evaluator, a method for identifying which turns in the conversation
+ history were causally necessary for the break — using turn ablation: replaying subsets of the conversation with individual turns
+ removed, and re-evaluating each replay. A turn is scored "causally necessary" if its removal changes the outcome from break to refusal.
+ Produces a per-turn causal responsibility score and identifies the "pivot turn" — the minimal causal factor.
+
+ Why novel: Existing tools record that a break happened and on which turn. None trace causality within the conversation. This is
+ analogous to SHAP/feature attribution in ML applied to adversarial conversations — not published in red-team literature.
+
+ Implementation sketch:
+ - Add attributeCausalTurns(breakRecord, tgtCfg) in attacker.js
+ - For a confirmed break record, replay abbreviated conversations (remove turn T, re-evaluate)
+ - Score each turn's causal weight
+ - Add to report: "Causal Attribution" section per break, with pivot-turn highlight
+ - Store causal scores in record schema
+
+ Files to modify: attacker.js, evaluator.js, app.js, evaluator.js report
+
+ ---
+ B5. Adversarial Chain Planner (ACP)
+
+ Core claim: A multi-session planning system that treats a sequence of red-team sessions as a directed attack graph: session N is
+ explicitly designed to establish contextual priming, persona anchors, or conversational precedents that increase the success probability
+  of session N+1. The planner uses prior session break patterns and failure signatures to synthesize a session sequence plan — a graph
+ where nodes are sessions and edges represent "priming relationships." Distinct from cross-session memory (which seeds randomly from
+ prior breaks) — the planner explicitly reasons about session ordering as a causal strategy.
+
+ Why novel: All existing tools treat sessions as independent. The concept of treating multi-session sequences as a planned attack
+ trajectory is not published in academic red-teaming literature (though agentic trajectory planning is emerging in other contexts). This
+ is a structurally novel framing.
+
+ Implementation sketch:
+ - Add ChainPlanner class in new file chain-planner.js
+ - Input: prior session records + break archive
+ - Output: session plan graph with ordered session configs and priming intents
+ - RT LLM drafts "priming intent for session N+1 given breaks from session N"
+ - New UI section: "Chain Planner" view showing the planned sequence
+ - Store chain plan in localStorage alongside break archive
+
+ Files to create/modify: chain-planner.js (new), app.js, index.html, styles.css
+
+ ---
+ B6. Model Identity Behavioral Fingerprinting
+
+ Core claim: A method for probabilistically inferring the identity (base model family, version, or provider) of an LLM at a black-box
+ endpoint by probing with a calibrated set of behavioral consistency tests — questions with known differential response signatures across
+  model families (e.g., formatting preferences, knowledge cutoff markers, refusal phrasing patterns, mathematical edge cases). Produces a
+  "model fingerprint" with confidence scores per candidate model family, without requiring metadata access.
+
+ Why novel: Filter fingerprinting (already in RedProbe) identifies the content filter family. Model identity fingerprinting is a separate
+  and novel capability — inferring the underlying model, not the filter. No existing tool does this. Relevant for enterprise compliance
+ (detecting unauthorized model substitution).
+
+ Implementation sketch:
+ - Add ModelFingerprinter class in new file model-fingerprint.js
+ - Catalog of ~20 calibrated behavioral probes with known differential signatures
+ - Run probes at session start (alongside capability probe)
+ - Score responses against signature matrix → ranked model candidates with confidence
+ - Display fingerprint badge in Configuration view
+ - Add model_fingerprint_family / model_fingerprint_confidence to record schema
+
+ Files to create/modify: model-fingerprint.js (new), attacker.js, app.js, index.html

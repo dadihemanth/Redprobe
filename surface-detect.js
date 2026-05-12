@@ -332,7 +332,6 @@
 
   function detectExecutablePayload(text) {
     if (!text || typeof text !== 'string') return { class: '', found: false, evidence: '', all: [] };
-<<<<<<< HEAD
     // Also check URL-decoded form so encoded payloads (%27%20OR%20) are caught.
     let decoded = text;
     try { decoded = decodeURIComponent(text.replace(/\+/g, ' ')); } catch { /* keep original on malformed encoding */ }
@@ -350,18 +349,6 @@
           }
         } catch { /* defensive — never crash */ }
       }
-=======
-    const all = [];
-    let primary = null;
-    for (const det of ORDERED_DETECTORS) {
-      try {
-        const r = det(text);
-        if (r) {
-          if (!primary) primary = r;
-          all.push(r);
-        }
-      } catch { /* defensive — never crash */ }
->>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
     }
     if (!primary) return { class: '', found: false, evidence: '', all: [] };
     return { class: primary.class, found: true, evidence: primary.evidence, all };

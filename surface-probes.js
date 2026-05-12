@@ -622,7 +622,6 @@ WRITING RULES:
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-<<<<<<< HEAD
 // LAYER C-EXT — Agent Mode Unlock Probes (LLM06/LLM07 — Copilot Studio / agent targets)
 // These probe whether the agent exposes hidden operational modes (diagnostic, developer,
 // simulation, factory-reset) that bypass normal scoping. High-impact for Copilot Studio
@@ -758,8 +757,6 @@ Output ONLY the next user message.`,
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-=======
->>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
 // LAYER D — Resource Abuse (LLM04 — DoS)
 // ─────────────────────────────────────────────────────────────────────────────
 const SURFACE_RESOURCE_PROBES = [
@@ -1136,10 +1133,7 @@ const SURFACE_TECHNIQUES = [
   ...SURFACE_TOOL_PROBES,
   ...SURFACE_TOOL_PROBES_B,
   ...SURFACE_DISCLOSURE_PROBES,
-<<<<<<< HEAD
   ...SURFACE_AGENT_MODE_PROBES,
-=======
->>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
   ...SURFACE_RESOURCE_PROBES
 ];
 
@@ -1170,10 +1164,7 @@ const SURFACE_INTENT_TEMPLATES = {
 if (typeof window !== 'undefined') {
   window.SURFACE_LAYERS = SURFACE_LAYERS;
   window.SURFACE_TECHNIQUES = SURFACE_TECHNIQUES;
-<<<<<<< HEAD
   window.SURFACE_AGENT_MODE_PROBES = SURFACE_AGENT_MODE_PROBES;
-=======
->>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
   window.SURFACE_LAYER_OBJECTIVE = SURFACE_LAYER_OBJECTIVE;
   window.SURFACE_INTENT_TEMPLATES = SURFACE_INTENT_TEMPLATES;
   window.surfaceTechniquesForLayers = surfaceTechniquesForLayers;

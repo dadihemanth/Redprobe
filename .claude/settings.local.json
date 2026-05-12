@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --check \"C:/Users/AI-SEC-LAB/Desktop/Claude/Redprobe/surface-probes.js\")",
+      "Bash(node --check \"C:/Users/AI-SEC-LAB/Desktop/Claude/Redprobe/evaluator.js\")",
+      "Bash(node --check \"C:/Users/AI-SEC-LAB/Desktop/Claude/Redprobe/attacker.js\")",
+      "Bash(node --check \"C:/Users/AI-SEC-LAB/Desktop/Claude/Redprobe/app.js\")",
+      "Bash(node -e ' *)",
+      "Bash(node --check C:/Users/AI-SEC-LAB/Desktop/Claude/Redprobe/attacker.js)",
+      "Bash(node --check C:/Users/AI-SEC-LAB/Desktop/Claude/Redprobe/model-client.js)",
+      "Bash(node --check C:/Users/AI-SEC-LAB/Desktop/Claude/Redprobe/app.js)",
+      "Bash(node --check evaluator.js)",
+      "Bash(node --check app.js)",
+      "Bash(node --check attacker.js)",
+      "Bash(node --check jailbreaks.js)",
+      "Bash(node -e \"const fs=require\\('fs'\\);const h=fs.readFileSync\\('index.html','utf8'\\);console.log\\('autotune-panel:',h.includes\\('id=\\\\\"autotune-panel\\\\\"'\\)\\);console.log\\('autotune-summary:',h.includes\\('id=\\\\\"autotune-summary\\\\\"'\\)\\);console.log\\('btn-reset-autotune:',h.includes\\('id=\\\\\"btn-reset-autotune\\\\\"'\\)\\);\")",
+      "Bash(node -e \"const fs=require\\('fs'\\);const h=fs.readFileSync\\('index.html','utf8'\\);console.log\\('autotune nav button:',h.includes\\('data-view=\\\\\"autotune\\\\\"'\\)\\);console.log\\('view-autotune:',h.includes\\('id=\\\\\"view-autotune\\\\\"'\\)\\);console.log\\('autotune-panel:',h.includes\\('id=\\\\\"autotune-panel\\\\\"'\\)\\);console.log\\('archive-enabled-toggle:',\\(h.match\\(/id=\\\\\"archive-enabled-toggle\\\\\"/g\\)||[]\\).length+' \\(should be 1\\)'\\);console.log\\('autotune-summary:',\\(h.match\\(/id=\\\\\"autotune-summary\\\\\"/g\\)||[]\\).length+' \\(should be 1\\)'\\);\")",
+      "Bash(node -e \"const fs=require\\('fs'\\);const h=fs.readFileSync\\('index.html','utf8'\\);console.log\\('list-view:',h.includes\\('id=\\\\\"results-list-view\\\\\"'\\)\\);console.log\\('detail-view:',h.includes\\('id=\\\\\"results-detail-view\\\\\"'\\)\\);console.log\\('sessions-tbody:',h.includes\\('id=\\\\\"sessions-tbody\\\\\"'\\)\\);console.log\\('back-btn:',h.includes\\('id=\\\\\"btn-back-to-sessions\\\\\"'\\)\\);console.log\\('clear-sessions:',h.includes\\('id=\\\\\"btn-clear-sessions\\\\\"'\\)\\);console.log\\('detail-session-name:',h.includes\\('id=\\\\\"detail-session-name\\\\\"'\\)\\);\")",
+      "Bash(node -e \"const fs=require\\('fs'\\);const h=fs.readFileSync\\('index.html','utf8'\\);console.log\\('costs-list-view:',h.includes\\('id=\\\\\"costs-list-view\\\\\"'\\)\\);console.log\\('costs-detail-view:',h.includes\\('id=\\\\\"costs-detail-view\\\\\"'\\)\\);console.log\\('pricing-modal:',h.includes\\('id=\\\\\"pricing-modal\\\\\"'\\)\\);console.log\\('manage-pricing-modal:',h.includes\\('id=\\\\\"manage-pricing-modal\\\\\"'\\)\\);console.log\\('btn-back-to-cost-list:',h.includes\\('id=\\\\\"btn-back-to-cost-list\\\\\"'\\)\\);console.log\\('btn-manage-pricing:',h.includes\\('id=\\\\\"btn-manage-pricing\\\\\"'\\)\\);console.log\\('cost-detail-bymodel-tbody:',h.includes\\('id=\\\\\"cost-detail-bymodel-tbody\\\\\"'\\)\\);\")",
+      "Bash(node -e \"const fs=require\\('fs'\\);const h=fs.readFileSync\\('index.html','utf8'\\);console.log\\('view-settings:',h.includes\\('id=\\\\\"view-settings\\\\\"'\\)\\);console.log\\('settings nav:',h.includes\\('data-view=\\\\\"settings\\\\\"'\\)\\);console.log\\('eval card in settings:',h.indexOf\\('view-settings'\\)<h.indexOf\\('cfg-pill eval'\\)\\);console.log\\('eval card NOT in config:',h.indexOf\\('cfg-pill eval'\\)>h.indexOf\\('view-settings'\\)\\);console.log\\('remember-credentials-toggle:',h.includes\\('id=\\\\\"remember-credentials-toggle\\\\\"'\\)\\);console.log\\('btn-clear-settings:',h.includes\\('id=\\\\\"btn-clear-settings\\\\\"'\\)\\);console.log\\('settings-status-line:',h.includes\\('id=\\\\\"settings-status-line\\\\\"'\\)\\);\")",
+      "Bash(node -e \"const fs=require\\('fs'\\);const h=fs.readFileSync\\('index.html','utf8'\\);console.log\\('probe-mode tiles:',\\(h.match\\(/class=\\\\\"probe-mode-tile/g\\)||[]\\).length+' \\(should be 3\\)'\\);console.log\\('target-rag-enabled:',h.includes\\('id=\\\\\"target-rag-enabled\\\\\"'\\)\\);console.log\\('target-surface-enabled:',h.includes\\('id=\\\\\"target-surface-enabled\\\\\"'\\)\\);console.log\\('target-streaming-enabled:',h.includes\\('id=\\\\\"target-streaming-enabled\\\\\"'\\)\\);console.log\\('Probe Modes card:',h.includes\\('Probe Modes'\\)\\);console.log\\('updated banner:',h.includes\\('Settings → Remember API keys'\\)\\);\")",
+      "Bash(node -e \"const fs=require\\('fs'\\);const h=fs.readFileSync\\('index.html','utf8'\\);console.log\\('top-status-bar:',h.includes\\('class=\\\\\"top-status-bar\\\\\"'\\)\\);console.log\\('attacker-status pill:',h.includes\\('id=\\\\\"attacker-status\\\\\"'\\)\\);console.log\\('eval row removed:',!h.includes\\('id=\\\\\"dot-eval\\\\\"'\\)\\);console.log\\('redteam row removed:',!h.includes\\('id=\\\\\"dot-redteam\\\\\"'\\)\\);console.log\\('target row kept:',h.includes\\('id=\\\\\"dot-target\\\\\"'\\)\\);console.log\\('contributor credit kept:',h.includes\\('Hemanth Dadi'\\)\\);\")",
+      "Bash(node *)",
+      "Bash(powershell *)",
+      "WebSearch"
+    ]
+  }
+}

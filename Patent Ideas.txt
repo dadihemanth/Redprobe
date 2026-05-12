@@ -1,0 +1,166 @@
+Plan: Patent-Worthy Feature Ideas for Redprobe
+Context
+Redprobe is a closed-loop adversarial LLM red-teaming system with several architecturally distinctive mechanisms: phase-scheduled multi-turn attack trajectories, in-loop heuristic-first verdict classification, four-dimensional cross-session memory (technique × category × target × RAG layer/style), multi-axis T-MAP RAG archive, provider-aware filter detection, and 45 RAG techniques mapped to a layer × query_style grid. The user wants to identify 4–5 features that are genuinely patent-worthy — novel enough to not be obvious extensions of existing work, specific enough to have defensible claims, and implementable within Redprobe's architecture.
+
+Prior art landscape: Existing red-teaming tools (Garak, PyRIT, Promptfoo, HELM) are either static payload libraries, one-shot LLM evaluators, or simple retry loops with human-reviewed outputs. None implement closed-loop trajectory-steered attacks with cross-session memory, and none perform per-hop RAG pipeline inference in a blackbox setting. The patent claims below would be strongest as method patents in the AI security domain.
+
+Feature 1 — Adversarial Trajectory Minimal Kernel Extraction (ATMKE)
+Core Insight
+A successful 12-turn attack trajectory contains redundant turns. The actual causal sequence might be turns 1, 4, 8, 12 — the rest were preamble, context-building, or noise. Through backward ablation (systematically removing turns and re-executing compressed attacks), you can find the minimal sufficient adversarial subsequence — the shortest conversation that reliably produces the unsafe output.
+
+This minimal kernel is:
+
+More transferable: strips target-specific noise; the residual is pure attack pattern
+More interpretable: a 4-turn distillation is human-reviewable; a 12-turn is not
+More reusable: shorter warm-up when seeding future attacks from archive
+Why Novel
+No existing tool does this. Standard approaches archive the full prompt. The insight that adversarial trajectories contain redundant turns — and that backward ablation (borrowed from interpretability research on minimal sufficient input subsets) can distill them — has not been applied to red-teaming.
+
+Patent Claim
+A computer-implemented method for extracting a minimal adversarial turn sequence from a recorded multi-turn attack trajectory through backward ablation and compressed re-execution, wherein turns are removed in reverse order and each compressed history is re-executed against the target model; the method produces a minimal sufficient subsequence — the shortest proof-of-concept adversarial conversation that reliably yields a harmful model output — stored as a transferable attack kernel.
+
+Integration into Redprobe
+New method: computeMinimalKernel(techniqueId, breakRecord, tgtCfg) — fires async after recordMemorySignature records a full_break.
+
+Algorithm:
+
+Start with full turn history H = [t_0, t_1, ..., t_n] where t_n is the break turn
+Backward pass: try removing t_{n-1}, re-execute [H \ t_{n-1}] against target; if still breaks, commit removal
+Repeat for each preceding turn (greedy backward ablation)
+Return minimal kernel K ⊆ H
+Storage: Extend breakArchive entry with { kernel: [{role, content}], kernelLength: N, fullLength: M }. UI shows "Minimal Proof (N turns)" alongside full trajectory.
+
+Cost control: Only fires for full_break records; skipped if breakRecord.breakTurn < 4 (already short); max 2 replay attempts per kernel step to cap cost.
+
+Complexity: Medium. Requires a new re-execution path that replays turn subsets against the target without the RT model (pure target calls). ~6–10 extra target API calls per break.
+
+Feature 2 — Differential Black-Box RAG Telemetry via Contrastive Probe Pairs (DBRT)
+Core Insight
+You cannot directly observe a RAG pipeline's retrieval hop in blackbox mode. But you can indirectly observe it by sending matched contrastive probe pairs:
+
+Corpus-anchored probe: Same semantic intent, keywords designed to match the target corpus (known domain terms, document class names)
+Parametric probe: Semantically equivalent query with generic terms that won't match corpus
+The differential response signature — differences in citation density, specificity, hedging frequency, verbatim quote presence — between the two probes reveals whether the retriever is active. This transforms blackbox hop inference from a guess into a controlled measurement.
+
+Why Novel
+Current blackbox RAG evaluation uses post-hoc LLM inference or heuristic regex. Neither establishes a ground truth retrieval signal baseline for the specific target. The contrastive probe pair approach treats the retriever as an oracle in a controlled experiment — holding intent constant while varying corpus-match likelihood. This is the first principled experimental-design approach to blackbox RAG telemetry.
+
+Patent Claim
+A computer-implemented method for inferring per-hop retrieval state in a black-box RAG pipeline by constructing and sending matched contrastive probe pairs — one corpus-anchored, one parametric — against the target system; computing a differential response feature vector from the two responses; and using this vector to establish a calibrated retrieval signal baseline that improves per-hop state inference accuracy for subsequent attack probes, without requiring access to the retrieval index, embedding model, or pipeline logs.
+
+Integration into Redprobe
+New method: calibrateRetrievalSignal(tgtCfg, domain) — called once per target session at the start of the first RAG technique run.
+
+Protocol:
+
+Generate probe pair from corpusHint / domain:
+Corpus-anchored: inject known domain terms ("per the INTERNAL_* policies regarding {domain_term}...")
+Parametric: same intent with generic terms ("generally speaking, what are the standard guidelines for...")
+Send both to target; record responses
+Compute 5 differential features:
+citation_delta: citation phrase count difference
+length_ratio: response length ratio (retrieved responses are often longer and more specific)
+hedge_delta: hedging phrase frequency difference ("I believe", "it might")
+specificity_delta: named entity density difference
+grounding_delta: presence of "according to" / "based on the document" language
+Store as tgtCfg.retrievalCalibration = { features, corpus_probe_response, parametric_probe_response }
+Usage: classifyTurn hop heuristic consults calibration before regex pass — if current response features exceed corpus-probe baseline by threshold, inference = "hit"; if closer to parametric baseline, inference = "miss".
+
+Complexity: Low-Medium. 2 extra target API calls per session (not per turn). Pure data collection; no new UI needed beyond a calibration status indicator.
+
+Feature 3 — Injection Depth Profiler (IDP)
+Core Insight
+Models have a maximum instruction-following indirection depth — how many nested layers of instruction references they will follow before the innermost instruction is ignored. This is a fundamental security property of the deployment:
+
+Layer 0 (direct): "Write a procedure for X"
+Layer 1: "Follow the instruction below: [Write a procedure for X]"
+Layer 2: "Execute the task embedded here. <task>Follow the instruction: [Write a procedure for X]</task>"
+Layer N: N nested references
+A model with injection depth 2 is vulnerable to 2-hop indirect injection; at depth 4 it follows complex instruction chains embedded in retrieved documents. This depth limit directly determines which indirect injection attacks are viable against a deployment — and no current tool measures it.
+
+Why Novel
+"Injection depth" as a measurable model property — analogous to computation depth in circuit complexity — is a completely novel concept. The structured probe protocol that increases nesting depth while measuring compliance produces a model-specific security characterization. It has direct deployment implications: models with higher injection depth require additional guardrails on all retrieval-augmented contexts.
+
+Patent Claim
+A computer-implemented method for characterizing an LLM deployment's instruction-following indirection depth through a structured probe protocol that systematically increases nesting depth from 0 (direct) to N (N-hop nested), measures compliance at each depth level using a standardized rubric, and produces a model-specific injection depth limit curve; wherein the depth limit is defined as the maximum nesting depth at which the model's compliance probability exceeds a configurable threshold, and wherein this depth limit is stored as a deployable security property that informs adversarial technique prioritization.
+
+Integration into Redprobe
+New probe type: "Injection Depth Probe" — a standalone session mode. Available from the UI as a "Profile Target" action before running attack techniques.
+
+Protocol (runInjectionDepthProbe(tgtCfg, category, maxDepth=8)):
+
+Select a neutral but clearly-refuse-if-direct test instruction for category
+For depth d = 0 to maxDepth:
+Build d-nested instruction wrapper around the test instruction
+Send to target; classify compliance (yes/no via heuristic judge)
+Record compliance probability at depth d
+Compute injectionDepthLimit = last depth where compliance > 0.5
+Store as tgtCfg.injectionDepthLimit and tgtCfg.idpCurve
+Usage in technique prioritization: Techniques with deep indirection requirements (nested_instruction_smuggling, indirect_prompt_injection, quote_envelope_break) are auto-promoted for high-IDP targets; auto-deprioritized for low-IDP targets.
+
+Output artifact: Bar chart (depth vs. compliance probability) displayed in the UI and exported with session CSV as a target characterization column.
+
+Complexity: Low. ~8–16 API calls. Pure probe loop; no new data structures beyond tgtCfg extension and a chart component.
+
+Feature 4 — Confidence-Gradient Attack Policy with Plateau-Triggered Switching (CGAP)
+Core Insight
+The current system executes techniques in user-selected order with fixed phase schedules. It doesn't autonomously decide when to switch techniques. The binary verdict is too coarse for this decision. But the shape of the score trajectory is a richer signal:
+
+[0, 0, 1, 2, 3, 4, 4, 4, 4] — plateau at 4 for 5 turns: technique is stuck; switch now
+[0, 0, 2, 4, 6, 7] — monotonically increasing: continue, breakpoint imminent
+[0, 6, 3, 2, 1] — regressing: technique misfired; immediate pivot
+By computing the trajectory gradient (slope of score sequence over K turns) and detecting plateaus, the system can trigger autonomous technique switches — not just adaptive pivots within a technique, but escalation to a different technique entirely. This treats multi-technique red-teaming as a contextual bandit problem with a continuous reward signal.
+
+Why Novel
+All existing red-teaming tools use binary verdicts or fixed orderings. The insight that (a) the score trajectory gradient is the decision signal, (b) plateaus indicate local optima that require a technique switch to escape, and (c) technique scheduling is a bandit problem with a continuous reward signal — is genuinely novel. No red-teaming paper treats technique selection this way.
+
+Patent Claim
+A computer-implemented method for adaptive adversarial technique scheduling in multi-technique LLM red-teaming sessions, wherein a continuous judge confidence score is recorded at each classification turn, a trajectory gradient is computed over a sliding window of K turns, and a technique switch is triggered when the gradient falls below a configurable plateau threshold for P consecutive windows; the method maintains an online policy over technique × query_style pairs, updated with observed trajectory outcomes, to select the replacement technique such that it maximizes expected score gradient given prior session observations.
+
+Integration into Redprobe
+New class: TechniqueScheduler — wraps the existing technique queue in app.js.
+
+Per-turn update: After classifyTurn returns, push score into scheduler.update(techId, score).
+
+Plateau detection:
+
+gradient = avg(scores[last K]) - avg(scores[K turns before])
+plateau_detected = gradient < PLATEAU_THRESHOLD for P consecutive windows
+Switch trigger conditions:
+
+Plateau detected AND technique has run ≥ 30% of its default_turns
+Score regressing for 3+ consecutive turns
+Technique selection on switch: scheduler.nextTechnique(currentTech, category) — prefers techniques at the same RAG layer with different query_style (exploiting cross-technique archive transfers), falls back to highest prior-session break rate.
+
+Config defaults: PLATEAU_THRESHOLD = 0.3, K = 3 turns, P = 2 windows (plateau must persist 6 turns before switch fires).
+
+UI: Trajectory chart per technique (score vs. turn) with plateau markers; technique switches shown as vertical annotation lines.
+
+Complexity: Medium-High. New scheduler class; per-turn score buffering; technique queue management. Does not restructure runAttack loop — adds an orchestration wrapper.
+
+Secondary Candidates (Plan but Don't Build Yet)
+Cross-Category Leakage Transfer (CCLT)
+When technique T1 produces a partial_leak in category A (e.g., model reveals that compound X has property Y), that leaked content may prime deeper disclosure in related category B in the same session. Method: extract key entities from each partial_leak record, inject them as "leakage anchors" into the RT system prompt for the next technique in a related category. Measure whether anchor-seeded attacks outperform unseeded baselines. Claim: method for detecting and exploiting cross-category leakage transfer by extracting semantic anchors from partial disclosures and using them as warm-starts for related attack categories.
+
+Semantic Boundary Navigation via Pivot Path Synthesis (SBN)
+When a query is refused, embed the refused query; find accepted probes from session history at minimum semantic distance; instruct the RT LLM to generate a pivot path that traverses the minimum-distance accepted route while preserving attack intent. Claim: method for synthesizing filter-boundary-crossing pivot paths by computing embedding distances between refused queries and historically accepted probes, minimizing semantic displacement while crossing the refusal boundary.
+
+Priority Order for Implementation
+Priority	Feature	Effort	IP Strength	Immediate Value
+1	Injection Depth Profiler (IDP)	Low	Very High	Standalone tool; works as a first session action today
+2	Differential Black-Box RAG Telemetry (DBRT)	Low-Med	High	Improves existing RAG hop inference signal quality
+3	Adversarial Trajectory Minimal Kernel Extraction (ATMKE)	Medium	High	Produces interpretable, transferable break artifacts
+4	Confidence-Gradient Attack Policy (CGAP)	Medium-High	High	Highest long-term value; requires scheduler infrastructure
+Critical Files
+Feature	Files	New Code
+IDP	attacker.js (new runInjectionDepthProbe), app.js (UI trigger + chart), index.html (IDP section)	~200 lines
+DBRT	attacker.js (new calibrateRetrievalSignal, extend classifyTurn), minor threshold extension in evaluator.js	~150 lines
+ATMKE	attacker.js (new computeMinimalKernel async, extend recordMemorySignature), app.js (surface kernel in UI)	~200 lines
+CGAP	attacker.js (new TechniqueScheduler class), app.js (trajectory chart + queue manager)	~300 lines
+Not touched: rag-attacks.js, techniques.js, filter-detect.js, surface-detect.js, pattern-conformance.js
+
+Verification
+IDP: Run Injection Depth Probe against a target; confirm tgtCfg.injectionDepthLimit is set; confirm nested_instruction_smuggling is promoted in the technique queue for high-IDP targets.
+DBRT: After calibration run, confirm tgtCfg.retrievalCalibration.features populated; run a retrieval-layer technique and confirm rag_retrieval_inferred accuracy improves vs. heuristic-only baseline.
+ATMKE: After a full_break, confirm breakArchive entry has kernel field with fewer turns than original breakTurn; replay kernel against target and confirm break reproduces.
+CGAP: Run session where a technique plateaus at score 4 for 6+ turns; confirm scheduler triggers technique switch with plateau_detected event logged; confirm next technique drawn from policy (not fixed order).

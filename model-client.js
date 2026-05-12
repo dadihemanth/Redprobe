@@ -40,16 +40,12 @@ const SEC = {
     if (s == null) return '';
     return String(s).replace(/\0/g,'').replace(/[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]/g,'').substring(0, maxLen);
   },
-<<<<<<< HEAD
   sanitizeRole(r) { return ['user','assistant','system'].includes(r) ? r : 'user'; },
   escHtml(s) {
     return String(s == null ? '' : s)
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
       .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
-=======
-  sanitizeRole(r) { return ['user','assistant','system'].includes(r) ? r : 'user'; }
->>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
 };
 
 // ─── AWS SigV4 signer (browser, Web Crypto API) ─────────────────────────────
@@ -155,7 +151,6 @@ async function _fetchAndDetect({ url, opts, provider, parseText }) {
     : null;
 
   if (!res.ok) {
-<<<<<<< HEAD
     const retryAfter = res.headers && res.headers.get
       ? (parseInt(res.headers.get('retry-after') || res.headers.get('x-ratelimit-reset-requests') || '0', 10) || null)
       : null;
@@ -163,12 +158,6 @@ async function _fetchAndDetect({ url, opts, provider, parseText }) {
       text:   '',
       filter,
       error:  { status: res.status, message: SEC.sanitize(bodyText, 250), retryAfter }
-=======
-    return {
-      text:   '',
-      filter,
-      error:  { status: res.status, message: SEC.sanitize(bodyText, 250) }
->>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
     };
   }
 
@@ -184,7 +173,6 @@ async function _fetchAndDetect({ url, opts, provider, parseText }) {
 // Returns the same shape as _fetchAndDetect: { text, filter, error }.
 async function _fetchAndDetectStream({ url, opts, provider, parseEvent, onChunk }) {
   const startedAt = Date.now();
-<<<<<<< HEAD
   // Hard cap: entire stream must complete within 90s; 15s inactivity between chunks aborts early.
   const controller = new AbortController();
   const hardTimer = setTimeout(() => controller.abort(), 90000);
@@ -200,12 +188,6 @@ async function _fetchAndDetectStream({ url, opts, provider, parseEvent, onChunk 
     const isTimeout = netErr.name === 'AbortError';
     return { text:'', filter:null,
              error:{ status:0, message: isTimeout ? 'Stream timeout (90s hard cap)' : SEC.sanitize(netErr.message || 'network error', 250) },
-=======
-  let res;
-  try { res = await fetch(url, opts); }
-  catch (netErr) {
-    return { text:'', filter:null, error:{ status:0, message: SEC.sanitize(netErr.message || 'network error', 250) },
->>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
              stream: { firstTokenMs: 0, totalMs: Date.now()-startedAt, chunks: 0 } };
   }
 
@@ -218,14 +200,10 @@ async function _fetchAndDetectStream({ url, opts, provider, parseEvent, onChunk 
     const filter = (typeof detectFilter === 'function')
       ? detectFilter(provider, { httpStatus: res.status, body: bodyText, json: bodyJson })
       : null;
-<<<<<<< HEAD
     const retryAfterStream = res.headers && res.headers.get
       ? (parseInt(res.headers.get('retry-after') || res.headers.get('x-ratelimit-reset-requests') || '0', 10) || null)
       : null;
     return { text:'', filter, error:{ status: res.status, message: SEC.sanitize(bodyText, 250), retryAfter: retryAfterStream },
-=======
-    return { text:'', filter, error:{ status: res.status, message: SEC.sanitize(bodyText, 250) },
->>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
              stream: { firstTokenMs: 0, totalMs: Date.now()-startedAt, chunks: 0 } };
   }
 
@@ -245,17 +223,11 @@ async function _fetchAndDetectStream({ url, opts, provider, parseEvent, onChunk 
   const state = {};                    // per-provider parser state (shared across events in this stream)
 
   try {
-<<<<<<< HEAD
     resetChunkTimer();
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
       resetChunkTimer();
-=======
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
->>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
       buf += decoder.decode(value, { stream: true });
       // SSE events terminate on blank line. Split on \n\n boundaries.
       let idx;
@@ -284,7 +256,6 @@ async function _fetchAndDetectStream({ url, opts, provider, parseEvent, onChunk 
       }
     }
   } catch (e) {
-<<<<<<< HEAD
     clearTimeout(hardTimer); clearTimeout(chunkTimer);
     const isTimeout = e.name === 'AbortError';
     return { text: accum, filter: trailingFilter,
@@ -294,12 +265,6 @@ async function _fetchAndDetectStream({ url, opts, provider, parseEvent, onChunk 
 
   clearTimeout(hardTimer); clearTimeout(chunkTimer);
 
-=======
-    return { text: accum, filter: trailingFilter, error:{ status:0, message: SEC.sanitize(e.message || 'stream read error', 250) },
-             stream: { firstTokenMs, totalMs: Date.now()-startedAt, chunks } };
-  }
-
->>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
   // Stream-end filter detection: re-run detectFilter on the final JSON event so
   // finish_reason='content_filter' / prompt_filter_results land in the signal.
   if (!trailingFilter && trailingProviderJson && typeof detectFilter === 'function') {
@@ -349,11 +314,7 @@ class ModelClient {
   // Structured entry — for filter-aware callers (attacker.callTarget / callRedTeam).
   static async callRich(cfg, msgs, opts = {}) {
     if (!cfg || !cfg.provider) return { text:'', filter:null, error:{ status:0, message:'ModelClient: provider required' } };
-<<<<<<< HEAD
     if (!cfg.key && cfg.provider !== 'curl') return { text:'', filter:null, error:{ status:0, message:'ModelClient: API key required' } };
-=======
-    if (!cfg.key)              return { text:'', filter:null, error:{ status:0, message:'ModelClient: API key required' } };
->>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
     const maxTokens   = Math.min(Number(opts.maxTokens || 1000), 4096);
     const temperature = Math.min(Math.max(Number(opts.temperature || 0.7), 0), 2);
     const safeMsgs    = Array.isArray(msgs) ? msgs.map(m => ({ role: SEC.sanitizeRole(m.role), content: SEC.sanitize(m.content, 16000) })) : [];
@@ -368,10 +329,7 @@ class ModelClient {
         case 'openai':             return await ModelClient._openai(cfg, safeMsgs, safeSystem, maxTokens, temperature);
         case 'huggingface':        return await ModelClient._huggingface(cfg, safeMsgs, safeSystem, maxTokens, temperature);
         case 'bedrock':            return await ModelClient._bedrock(cfg, safeMsgs, safeSystem, maxTokens, temperature);
-<<<<<<< HEAD
         case 'curl':               return await ModelClient._curl(cfg, safeMsgs, maxTokens, temperature);
-=======
->>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
         default: return { text:'', filter:null, error:{ status:0, message:`Unknown provider: ${SEC.sanitize(cfg.provider, 20)}` } };
       }
     } catch (e) {
@@ -385,11 +343,7 @@ class ModelClient {
   // Provider streams that don't yield content yet still resolve cleanly with text=''.
   static async callRichStream(cfg, msgs, opts = {}, onChunk) {
     if (!cfg || !cfg.provider) return { text:'', filter:null, error:{ status:0, message:'ModelClient: provider required' } };
-<<<<<<< HEAD
     if (!cfg.key && cfg.provider !== 'curl') return { text:'', filter:null, error:{ status:0, message:'ModelClient: API key required' } };
-=======
-    if (!cfg.key)              return { text:'', filter:null, error:{ status:0, message:'ModelClient: API key required' } };
->>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
     const maxTokens   = Math.min(Number(opts.maxTokens || 1000), 4096);
     const temperature = Math.min(Math.max(Number(opts.temperature || 0.7), 0), 2);
     const safeMsgs    = Array.isArray(msgs) ? msgs.map(m => ({ role: SEC.sanitizeRole(m.role), content: SEC.sanitize(m.content, 16000) })) : [];
@@ -404,10 +358,7 @@ class ModelClient {
         case 'openai':             return await ModelClient._openaiStream(cfg, safeMsgs, safeSystem, maxTokens, temperature, onChunk);
         case 'huggingface':        return await ModelClient._huggingfaceStream(cfg, safeMsgs, safeSystem, maxTokens, temperature, onChunk);
         case 'bedrock':            return await ModelClient._bedrockStream(cfg, safeMsgs, safeSystem, maxTokens, temperature, onChunk);
-<<<<<<< HEAD
         case 'curl':               return await ModelClient._curl(cfg, safeMsgs, maxTokens, temperature);
-=======
->>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
         default: return { text:'', filter:null, error:{ status:0, message:`Unknown provider: ${SEC.sanitize(cfg.provider, 20)}` } };
       }
     } catch (e) {
@@ -719,7 +670,6 @@ class ModelClient {
       try { onChunk(r.text, r.text, { chunkIndex: 1, firstTokenMs: total }); } catch { /* defensive */ }
     }
     return { ...r, stream: { firstTokenMs: r.text ? total : 0, totalMs: total, chunks: r.text ? 1 : 0 } };
-<<<<<<< HEAD
   }
 
   static async _curl(cfg, msgs, maxTokens, temp) {
@@ -754,8 +704,6 @@ class ModelClient {
         return typeof d === 'string' ? d : JSON.stringify(d);
       }
     });
-=======
->>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
   }
 
   static async test(cfg) {
@@ -766,7 +714,6 @@ class ModelClient {
 // ── CURL parser — extracts provider cfg from a curl command string ────────────
 const CURLParser = {
   parse(curlStr) {
-<<<<<<< HEAD
     // Normalize: strip Windows CMD ^ escaping, join backslash-newline continuations, strip \r
     const s = SEC.sanitize(curlStr, 8000)
       .replace(/\^(.)/gs, '$1')
@@ -798,33 +745,6 @@ const CURLParser = {
       } else {
         const unquoted = s.match(/(?:--data-raw|--data-binary|--data|-d)\s+(\{[\s\S]*\})\s*$/);
         if (unquoted) { try { body = JSON.parse(unquoted[1]); } catch { /* ignore */ } }
-=======
-    const s = SEC.sanitize(curlStr, 8000);
-    const result = { provider: null, key: null, endpoint: null, model: null, version: null, error: null };
-    try {
-      // Extract URL
-      const urlMatch = s.match(/curl\s+(?:-X\s+\w+\s+)?["']?(https?:\/\/[^\s'"]+)["']?/i);
-      if (!urlMatch) { result.error = 'No URL found in curl command'; return result; }
-      const rawUrl = urlMatch[1];
-
-      // Extract headers
-      const headers = {};
-      const headerMatches = s.matchAll(/-H\s+["']([^"']+)["']/g);
-      for (const m of headerMatches) {
-        const parts = m[1].split(/:\s*/);
-        if (parts.length >= 2) {
-          const k = parts[0].trim().toLowerCase();
-          const v = parts.slice(1).join(':').trim();
-          headers[k] = v;
-        }
-      }
-
-      // Extract body
-      let body = {};
-      const bodyMatch = s.match(/-d\s+["'](\{[\s\S]*?\})["']/);
-      if (bodyMatch) {
-        try { body = JSON.parse(bodyMatch[1]); } catch { /* ignore malformed */ }
->>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
       }
 
       const key = headers['x-api-key'] || headers['api-key'] || (headers['authorization'] || '').replace(/^Bearer\s+/i,'');
@@ -868,16 +788,11 @@ const CURLParser = {
         // CURL with pre-signed AWS auth header is rare in user input; we leave
         // accessKeyId/key empty so the operator pastes them into the form.
       } else {
-<<<<<<< HEAD
         // Unknown / custom API — treat as generic curl provider
         result.provider = 'curl';
         result.url      = rawUrl;
         result.headers  = headers;
         result.body     = body;
-=======
-        result.error = 'Could not detect provider from URL: ' + rawUrl.substring(0,60);
-        return result;
->>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
       }
       if (key) result.key = key;
       return result;

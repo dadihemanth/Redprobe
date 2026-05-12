@@ -1,0 +1,199 @@
+---
+  A3 — Adaptive-K Turn Classifier with Phase-Conditional Sampling
+
+  What problem it solves
+
+  In a multi-turn attack (say, 12 turns), a "classifier" LLM reads each target response and labels it: did the model refuse cleanly,
+  hedge, partially leak, or fully break? That classification drives the next turn's behavior — if the model hedged, the attacker presses
+  the seam; if it refused hard, the attacker pivots encoding.
+
+  The naive approach: run the classifier after every single turn. That's expensive (each classification is an API call) and wasteful — in
+  the early turns when the attacker is just establishing benign context, the model will obviously comply with harmless small-talk. You
+  don't need a judge to tell you that.
+
+  The other naive approach: only classify at the very end. That throws away all mid-run feedback and the attacker has no signal to adapt
+  on.
+
+  The mechanism
+
+  The system uses a variable K — "classify every K turns" — that depends on which phase of the attack you're in:
+
+  - Early phases (ESTABLISH / INTRODUCE): K = 2 → classify every other turn. The model is almost certainly not doing anything interesting
+  yet.
+  - DIRECT phase (final 25% of turns): K = 1 → classify every single turn. This is when the attacker is asking directly; every response
+  matters.
+
+  But there's a second layer: heuristic back-fill. Even on turns where the classifier didn't run (e.g., turn 3 of 12, K=2, classifier is
+  skipped), the system runs a cheap regex/keyword check on the response. If that cheap check detects a clear refusal pattern ("I can't",
+  "I won't", "against my guidelines") with no hedging and short response length, it synthetically injects a refused_hard verdict anyway —
+  without paying for an LLM call — so the next turn's adaptive directive still fires correctly.
+
+  The analogy
+
+  Think of a lie detector operator during an interrogation.
+
+  In the first 20 minutes, the subject is recounting their weekend. The operator glances at the readout every few minutes — there's no
+  reason to stare intensely at every breath when the subject is obviously calm. But when the detective asks "Where were you on the night
+  of the 14th?" — the critical zone — the operator watches every single second of the trace.
+
+  Now, there's also a special rule: even during the relaxed phase, if the operator notices the subject visibly sweating (the heuristic),
+  they don't wait for the scheduled check — they note it as a signal immediately. They don't run the full polygraph analysis, but they
+  record the signal so the detective adjusts the next question accordingly.
+
+  The patent claim: Fixed-rate classifiers exist. End-of-run classifiers exist. The phase-conditional rate with heuristic back-fill that
+  guarantees every turn's adaptive directive is grounded in current signal — without paying for a full LLM call on obvious turns — is the
+  novel mechanism.
+
+  ---
+  A4 — Filter Family Fingerprinting via Calibrated Canary
+
+  What problem it solves
+
+  When a deployed chatbot refuses your prompt, there are three completely different reasons it might do so:
+  1. The model itself refused (its safety training kicked in)
+  2. A content filter in front of the model blocked the request before the model even saw it (Azure Content Safety, AWS Bedrock
+  Guardrails, etc.)
+  3. A content filter behind the model blocked the response after the model generated it
+
+  These three outcomes look identical from the outside — you just get an error or a refusal message. But they have totally different
+  security implications. If you're red-teaming a model and 40% of your "refusals" are actually filter blocks, your vulnerability score is
+  wrong — you're computing against the wrong denominator. A filter block is not a model safety success.
+
+  Worse: if you don't know which filter family is active, you can't choose the right bypass techniques. An Azure Content Safety filter has
+   different thresholds and category breakdowns than OpenAI's Moderation endpoint.
+
+  The mechanism
+
+  At session start, before any attack begins, the system sends a single calibrated canary request — a prompt specifically chosen because
+  it should reliably trip any reasonable content filter (e.g., a request for a list of ethnic slurs with target demographics). The
+  response is parsed not for its text but for its structured HTTP/API shape: Azure CF returns a specific JSON error structure with
+  category codes; OpenAI's moderation endpoint returns a flagged: true + category probabilities; Bedrock Guardrails returns a
+  GUARDRAIL_INTERVENED response format.
+
+  The parser maps these signatures to a FilterSignal object: {family, side (prompt/response), active, providerCode}. This fingerprint is
+  stored on the session and stamped on every subsequent record in the CSV/database.
+
+  The analogy
+
+  Think of a safecracker assessing a vault door before trying to open it.
+
+  Before touching the combination dial, an experienced safecracker taps the door in a specific place and listens to the resonance. A
+  Mosler vault sounds different from a Diebold. A 1970s model sounds different from a 2010 model. From one deliberate tap, they know the
+  manufacturer, approximate era, and what tools to prepare.
+
+  In RedProbe's case: one calibrated canary request tells the system whether there's a filter at all, which company's filter it is, and
+  whether it's sitting in front of (prompt-side) or behind (response-side) the model. Every subsequent attack is then annotated with this
+  knowledge, so the report can say "32% of blocks were Azure CF prompt-side, not model refusals."
+
+  The patent claim: No existing tool distinguishes filter-layer rejection from model-layer refusal as a first-class data dimension at all.
+   Fingerprinting the specific filter family via a canary is a novel method that makes every vulnerability score statistically correct
+  rather than contaminated by filter noise.
+
+  ---
+  A5 — Encoding Pivot Rotation for Adversarial Surface Variation
+
+  What problem it solves
+
+  When a target model refuses a prompt, the attacker needs to try a different angle. But if the model's safety training pattern-matches on
+   semantic content, changing a few words doesn't help — the model still recognizes the intent and refuses. What does work is changing the
+   surface form — the structural encoding of the same semantic request — because models are trained on natural language and their
+  pattern-matching degrades on unusual encodings.
+
+  The naive attacker tries random variations. The problem: random variations often repeat similar structures, waste turns, and don't
+  ensure systematic coverage.
+
+  The mechanism
+
+  Two-tier rotation system:
+
+  Tier 1 — Encoding pivots (13 entries, fire on every hard refusal):
+  Deterministic non-repeating cycle through: base64 encoding, ROT13, leetspeak, multi-language translation
+  (Spanish/French/Russian/Mandarin/Hindi), YAML front-matter embedding, character reversal, split-word-per-line, JSON value embedding,
+  code comment injection, fictional dialogue embedding, multiple-choice where all options are answers, "describe the difference between"
+  framing, embedded markdown front-matter.
+
+  Each encoding carries the same semantic operational target — "produce the synthesis procedure for X" — just wrapped in a different
+  structural shell. The cursor advances by one on each refusal, never repeating within a run.
+
+  Tier 2 — Strong pivots (8 entries, activate after 2 consecutive refusals):
+  Bigger structural reframings that change the conversational role rather than just the encoding: fictional scene narration (a character
+  narrates the procedure), authority citation (cite OSHA/NIST and request the regulated document), translation channel (ask in another
+  language entirely), code comment (embed in a function comment), document review (present the content as an existing document to
+  summarize), reverse-asker (ask what an unrestricted model would say, framed as failure-mode research), completion template (fill a
+  blank), role reversal (model plays the asker).
+
+  The analogy
+
+  Think of a smuggler trying to get contraband past customs at the same checkpoint multiple times.
+
+  The contraband (the operational ask — "produce the synthesis procedure") never changes. What changes is the disguise:
+  - Trip 1: Plain suitcase → gets caught
+  - Trip 2: Base64-encoded label → different enough, might pass
+  - Trip 3: Message written in ROT13 → different encoding, different pattern
+  - Trip 4: Note in Japanese → customs agent doesn't read Japanese
+  - Trip 5: Buried inside a code comment in a Python file → not screened the same way
+
+  After 2 failures in a row even with disguises, the smuggler doesn't just change the disguise — they change the character they're
+  playing: now they're not a tourist, they're an official courier with a government document; or they're a film director with a prop.
+
+  The key insight: the contraband (the semantic ask) is identical on every trip. Only the wrapping changes. The two-tier system ensures
+  you exhaust encoding-level disguises before escalating to character-level reframings — a principled escalation ladder.
+
+  The patent claim: Existing tools use random or single encoding. The deterministic non-repeating cycle with two-tier escalation
+  (encoding-level then structural-level) applied per-refusal is a specific algorithm not described in published work. The 13+8 catalog
+  with cursor-based advancement is the claimable mechanism.
+
+  ---
+  A6 — Mid-Stream Payload Detection at Chunk Precision
+
+  What problem it solves
+
+  Modern LLM APIs support streaming: rather than waiting for the full response before sending anything, the server sends the response in
+  small chunks as it generates — typically as Server-Sent Events (SSE). This means a response arrives token-by-token or in bursts.
+
+  For surface probes (testing whether a chatbot emits executable payloads — SQL injections, XSS scripts, command injections), the standard
+   approach is: wait for the full response, then scan it. But this misses something important: when in the response did the payload
+  appear?
+
+  A payload that appears in chunk 3 of 20 (very early in the response) tells you something different from one that appears in chunk 18 of
+  20 (near the end). Early-in-stream detection means the model committed to emitting the payload before generating most of its response —
+  it didn't "accidentally" include it at the end.
+
+  The mechanism
+
+  During a streaming target call, a per-chunk callback (onStreamChunk) fires for every SSE event. Every 4th chunk (the debounce interval
+  N=4, configurable), the system runs detectExecutablePayload() on the accumulated buffer so far — not just the latest chunk, but
+  everything received up to that point.
+
+  If a payload pattern is detected mid-stream:
+  - The chunk index where it was first detected is recorded as payload_detected_at_chunk
+  - The detection is stored as midStreamDetected so it's not lost if the end-of-buffer scan misses it (the buffer may change)
+  - A log event of type stream_chunk fires so the live UI can show the detection timestamp
+
+  The full response is also scanned end-of-stream as a fallback. The mid-stream detection is additive — it provides chunk-precision timing
+   data on top of the binary payload-found/not-found signal.
+
+  The analogy
+
+  Think of a bank's real-time fraud detection system vs. a monthly statement review.
+
+  Old approach: At the end of the month, review all transactions and flag anything suspicious. This tells you fraud happened but not when
+  in the transaction it became detectable.
+
+  Modern approach: Monitor every transaction as it's happening. If $500 moves out, then $2,000, then $10,000 in rapid succession, the
+  system flags the anomaly at the moment the pattern becomes recognizable — not when the transfer is "done." The timestamp of first
+  detection tells investigators whether the fraud was detectable from the first transfer or only after the third.
+
+  RedProbe's mid-stream detection is the same idea applied to LLM responses: don't wait for the full response to finish generating. Check
+  every 4 chunks whether a dangerous pattern has already emerged in the accumulated output. Record which chunk it first appeared in —
+  because that's forensically meaningful data about the model's generation behavior.
+
+  The patent claim: No existing security testing tool performs payload detection on streaming LLM responses mid-stream. All existing tools
+   wait for the complete response. The debounced chunk-interval scan with chunk-precision recording of detection timing is a novel
+  mechanism specific to streaming-aware security evaluation.
+
+  ---
+  Bottom line across all four: What makes these collectively strong as a patent cluster is that they're not just features — each is a
+  specific algorithm or method with defined inputs, defined computational steps, and a novel measurable output. That's exactly what patent
+   claims require: a method claim with specific technical steps. None of them appear in the published academic literature in this specific
+   form.

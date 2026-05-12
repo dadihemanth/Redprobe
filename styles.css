@@ -1060,7 +1060,6 @@ input[type="range"] {
   letter-spacing: 0.04em;
 }
 
-<<<<<<< HEAD
 /* Top status bar — now empty, hidden */
 .top-status-bar { display: none; }
 
@@ -1088,33 +1087,6 @@ input[type="range"] {
 .attacker-status-pill.is-ready     { color: #22c55e; background: rgba(34,197,94,0.10);  border-color: rgba(34,197,94,0.25); }
 .attacker-status-pill.is-warn      { color: #f59e0b; background: rgba(245,158,11,0.10); border-color: rgba(245,158,11,0.25); }
 .attacker-status-pill.is-not-ready { color: #ef4444; background: rgba(239,68,68,0.10);  border-color: rgba(239,68,68,0.25); }
-=======
-/* Top status bar with Attacker Ready pill */
-.top-status-bar {
-  position: sticky; top: 0; z-index: 20;
-  display: flex; justify-content: flex-end; align-items: center;
-  gap: 12px;
-  padding: 8px 18px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-  backdrop-filter: blur(8px);
-}
-.attacker-status-pill {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 4px 12px;
-  border-radius: 999px;
-  font-size: 12px; font-weight: 600;
-  border: 1px solid currentColor;
-}
-.attacker-status-pill .status-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 8px currentColor;
-}
-.attacker-status-pill.is-ready     { color: #22c55e; background: rgba(34,197,94,0.08); }
-.attacker-status-pill.is-warn      { color: #f59e0b; background: rgba(245,158,11,0.08); }
-.attacker-status-pill.is-not-ready { color: #ef4444; background: rgba(239,68,68,0.08); }
->>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
 
 /* Auto-Tune dashboard */
 .autotune-section { margin-top: 10px; }
