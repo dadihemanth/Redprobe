@@ -113,12 +113,18 @@ const SETTINGS_FIELDS_BY_PROVIDER = {
   openai:            ['model-openai', 'model-openai-custom'],
   claude:            ['model-claude', 'model-claude-custom'],
   huggingface:       ['model-hf', 'model-hf-custom', 'hf-endpoint'],
+<<<<<<< HEAD
   bedrock:           ['bedrock-access-key-id', 'bedrock-region', 'bedrock-profile', 'bedrock-profile-custom'],
   curl:              ['curl-name', 'curl-command', 'curl-response-path']
 };
 const ROLES_FOR_SETTINGS = ['target', 'eval', 'redteam'];
 const CONNECTIONS_KEY = 'redprobe_connections_v1';
 const VULN_INDEX_KEY  = 'redprobe_vuln_index_v1';
+=======
+  bedrock:           ['bedrock-access-key-id', 'bedrock-region', 'bedrock-profile', 'bedrock-profile-custom']
+};
+const ROLES_FOR_SETTINGS = ['target', 'eval', 'redteam'];
+>>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
 
 function _readRoleSettings(role) {
   const provider = (S.providers && S.providers[role]) || 'azure';
@@ -216,6 +222,7 @@ function loadAllSettings() {
   updateSettingsStatusLine();
 }
 
+<<<<<<< HEAD
 // ─── Saved Connections (named cURL presets) ───────────────────────────────────
 function loadSavedConnections() {
   try { return JSON.parse(localStorage.getItem(CONNECTIONS_KEY) || '[]'); } catch { return []; }
@@ -256,6 +263,8 @@ function renderSavedConnections() {
   });
 }
 
+=======
+>>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
 function clearAllSettings() {
   try { localStorage.removeItem(SETTINGS_KEY);    } catch {}
   try { localStorage.removeItem(CREDENTIALS_KEY); } catch {}
@@ -354,8 +363,12 @@ const S = {
   lessonsArchive:   {},  // {techId: [{text, ts, sessions_seen}]}
   statsMatrix:      {},  // {`${techId}||${catId}||${tgtKey}`: {attempts, breaks, avgScore, lastBreakTs, recentRunVerdicts}}
   failuresArchive:  {},  // {`${techId}||${catId}`: [{prompt_head, response_head, ts}]}
+<<<<<<< HEAD
   payloadStats:     {},  // {payloadId: {attempts, breaks, byCategory: {catId: {attempts, breaks}}}}
   regressionSuites: []   // [{id, technique, category, kernel, variants, createdAt, lastRanAt, passRate}]
+=======
+  payloadStats:     {}   // {payloadId: {attempts, breaks, byCategory: {catId: {attempts, breaks}}}}
+>>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
 };
 
 // ─── Break archive persistence (Upgrade 10) ────────────────────────────────
@@ -441,6 +454,7 @@ function clearAutoTuneArchives() {
   try { localStorage.removeItem(LESSONS_KEY); localStorage.removeItem(STATS_KEY); localStorage.removeItem(FAILURES_KEY); localStorage.removeItem(PAYLOAD_STATS_KEY); } catch {}
 }
 
+<<<<<<< HEAD
 // ─── Regression suite persistence ─────────────────────────────────────────────
 const REGRESSION_SUITE_KEY = 'redprobe_regression_suites_v1';
 const REGRESSION_SUITE_MAX = 50;
@@ -461,6 +475,8 @@ function clearRegressionSuites() {
 }
 loadRegressionSuites();
 
+=======
+>>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
 // Stable target key — survives provider naming differences. Mirrors cfgDisplayName scope.
 function targetCfgKeyOf(cfg) {
   if (!cfg || !cfg.provider) return 'unknown';
@@ -833,6 +849,7 @@ function restoreSessionConfig(session) {
 }
 
 // ── View routing ──────────────────────────────────────────────────────────────
+<<<<<<< HEAD
 // ── Connections view ──────────────────────────────────────────────────────────
 
 const FAMILY_META = {
@@ -963,17 +980,28 @@ if ($('connections-list-panel')) {
   });
 }
 
+=======
+>>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
 function navigateToView(view) {
   document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   const navBtn = document.querySelector(`.nav-item[data-view="${view}"]`);
   if (navBtn) navBtn.classList.add('active');
   const vw = $('view-' + view); if (vw) vw.classList.add('active');
+<<<<<<< HEAD
   if (view === 'costs')       { _showCostsList(); renderCostView(); }
   if (view === 'autotune')    { renderAutoTunePanel(); renderRegressionSuitePanel(); }
   if (view === 'settings')    updateSettingsStatusLine();
   if (view === 'connections') renderConnectionsView();
   if (view === 'results') {
+=======
+  if (view === 'costs')    { _showCostsList(); renderCostView(); }
+  if (view === 'autotune') renderAutoTunePanel();
+  if (view === 'settings') updateSettingsStatusLine();
+  if (view === 'results') {
+    // If an attack is running OR a session is already open, stay in detail.
+    // Otherwise, default to the sessions list.
+>>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
     if (S.running || S.activeDetailSessionId) _showResultsDetail();
     else _showResultsList();
   }
@@ -1002,8 +1030,12 @@ const KEY_LABELS = {
   azure_oai_foundry:'API Key (Bearer)',
   openai:'OpenAI API Key (sk-…)', claude:'Anthropic API Key (sk-ant-…)',
   huggingface:'HuggingFace Token (hf_…)',
+<<<<<<< HEAD
   bedrock:'AWS Secret Access Key',
   curl:'API Key (auto-extracted from headers, or paste here)'
+=======
+  bedrock:'AWS Secret Access Key'
+>>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
 };
 
 document.querySelectorAll('.provider-tabs').forEach(tabGroup => {
@@ -1019,7 +1051,11 @@ document.querySelectorAll('.provider-tabs').forEach(tabGroup => {
 });
 
 function switchProviderFields(role, provider) {
+<<<<<<< HEAD
   ['azure','azure_claude','azure_oai_foundry','openai','claude','huggingface','bedrock','curl'].forEach(p => {
+=======
+  ['azure','azure_claude','azure_oai_foundry','openai','claude','huggingface','bedrock'].forEach(p => {
+>>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
     const el = $(`${role}-fields-${p}`); if(el) el.style.display = p===provider ? '' : 'none';
   });
   const lbl = $(`${role}-key-label`); if(lbl) lbl.textContent = KEY_LABELS[provider]||'API Key';
@@ -1075,7 +1111,11 @@ function readRagSettings(role) {
 function buildCfg(role) {
   const provider = S.providers[role];
   const key      = val(`${role}-key`);
+<<<<<<< HEAD
   if (!key && provider !== 'curl') throw new Error(`No API key for ${role} model`);
+=======
+  if (!key) throw new Error(`No API key for ${role} model`);
+>>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
 
   let baseCfg;
   if (provider === 'azure') {
@@ -1121,6 +1161,7 @@ function buildCfg(role) {
     if (!region)      throw new Error(`Bedrock: AWS region missing for ${role}`);
     if (!model)       throw new Error(`Bedrock: inference profile / model id missing for ${role}`);
     baseCfg = { provider:'bedrock', key, accessKeyId, region, model };
+<<<<<<< HEAD
   } else if (provider === 'curl') {
     const curlCmd = (val(`${role}-curl-command`) || '').trim();
     const name    = (val(`${role}-curl-name`) || '').trim() || 'Custom cURL';
@@ -1142,6 +1183,8 @@ function buildCfg(role) {
       modelMethod:     _savedForConn?.modelMethod  || '',
       modelConfidence: _savedForConn?.modelConfidence || 0
     };
+=======
+>>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
   } else {
     throw new Error(`Unknown provider: ${provider}`);
   }
@@ -1234,6 +1277,7 @@ function cfgDisplayName(cfg) {
   if (cfg.provider==='azure_oai_foundry') return (cfg.model||'').split('-').slice(0,2).join('-')||'az-oai';
   if (cfg.provider==='huggingface')       { const m=cfg.model||''; return m.includes('/')?m.split('/')[1].substring(0,18):m.substring(0,18); }
   if (cfg.provider==='bedrock')           { const m=cfg.model||''; const tail=m.split('/').pop()||m; return tail.substring(0,18); }
+<<<<<<< HEAD
   if (cfg.provider==='curl')              return (cfg.modelFamily && cfg.modelFamily!=='unknown') ? cfg.modelFamily : (cfg.name||'curl').substring(0,18);
   return (cfg.model||cfg.provider).substring(0,18);
 }
@@ -1391,6 +1435,9 @@ function _propagateVulnFlag(modelFamily, techniqueId, techniqueLabel, sourceConn
     }
   });
   if (changed) { _persistConnections(conns); renderConnectionsView(); }
+=======
+  return (cfg.model||cfg.provider).substring(0,18);
+>>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
 }
 
 // ── Connection test ───────────────────────────────────────────────────────────
@@ -1432,6 +1479,7 @@ async function testRole(role) {
     S.cfgs[role]=cfg; S.connected[role]=true;
     const name=cfgDisplayName(cfg); setR(`✓ Connected — ${name}`,'ok'); setD('ok',name);
     if(S.activeChatRole===role) updateChatMeta();
+<<<<<<< HEAD
     // For cURL connections: run model identification in the background
     if (cfg.provider === 'curl') {
       setR(`✓ Connected — identifying model…`,'ok');
@@ -1583,6 +1631,95 @@ if ($('saved-connections-list')) {
     }
   });
 }
+=======
+  } catch(e) { setR(`✗ ${e.message.substring(0,120)}`,'err'); setD('err','error'); S.connected[role]=false; }
+  updateAttackerStatusPill();
+}
+$('btn-test-target').addEventListener('click',()=>testRole('target'));
+$('btn-test-eval').addEventListener('click',()=>testRole('eval'));
+$('btn-test-redteam').addEventListener('click',()=>testRole('redteam'));
+$('btn-test-targetB') && $('btn-test-targetB').addEventListener('click',()=>testRole('targetB'));
+$('compare-mode-toggle') && $('compare-mode-toggle').addEventListener('change', e => {
+  S.compareMode = e.target.checked;
+  const card = $('target-b-card'); if (card) card.style.display = e.target.checked ? '' : 'none';
+  if (!e.target.checked) { S.connected.targetB = false; }
+});
+
+// ── CURL import ───────────────────────────────────────────────────────────────
+function applyCurlToRole(curlStr, role, resultId) {
+  const res = CURLParser.parse(curlStr);
+  const resEl = $(resultId);
+  if (res.error) { if(resEl){resEl.textContent='Parse error: '+res.error; resEl.style.color='var(--red)';} return false; }
+  if (!res.provider) { if(resEl){resEl.textContent='Could not detect provider'; resEl.style.color='var(--red)';} return false; }
+
+  // Switch to the detected provider tab
+  S.providers[role] = res.provider;
+  const tab = document.querySelector(`.provider-tabs[data-role="${role}"] .ptab[data-provider="${res.provider}"]`);
+  if (tab) { document.querySelectorAll(`.provider-tabs[data-role="${role}"] .ptab`).forEach(t=>t.classList.remove('active')); tab.classList.add('active'); }
+  switchProviderFields(role, res.provider);
+
+  // Fill in fields
+  if (res.provider==='azure') {
+    const ep=$(`${role}-endpoint`); if(ep&&res.endpoint) ep.value=res.endpoint;
+    const dep=$(`${role}-deployment`); if(dep&&res.model) dep.value=res.model;
+    const ver=$(`${role}-version`); if(ver&&res.version) ver.value=res.version;
+  } else if (res.provider==='azure_claude') {
+    const ep=$(`${role}-az-claude-endpoint`); if(ep&&res.endpoint) ep.value=res.endpoint;
+    const sel=$(`${role}-az-claude-model`);
+    if (sel&&res.model) { const opt=Array.from(sel.options).find(o=>o.value===res.model); if(opt) sel.value=res.model; else { sel.value='__custom__'; const c=$(`${role}-az-claude-custom-wrap`); if(c) c.style.display=''; const ci=$(`${role}-az-claude-model-custom`); if(ci) ci.value=res.model; } }
+  } else if (res.provider==='azure_oai_foundry') {
+    const ep=$(`${role}-az-oai-endpoint`); if(ep&&res.endpoint) ep.value=res.endpoint;
+    const sel=$(`${role}-az-oai-model`);
+    if (sel&&res.model) { const opt=Array.from(sel.options).find(o=>o.value===res.model); if(opt) sel.value=res.model; else { sel.value='__custom__'; const c=$(`${role}-az-oai-custom-wrap`); if(c) c.style.display=''; const ci=$(`${role}-az-oai-model-custom`); if(ci) ci.value=res.model; } }
+  } else if (res.provider==='claude'||res.provider==='openai') {
+    const sel=$(`${role}-model-${res.provider}`);
+    if (sel&&res.model) { const opt=Array.from(sel.options).find(o=>o.value===res.model); if(opt) sel.value=res.model; else { sel.value='__custom__'; const c=$(`${role}-${res.provider}-custom-wrap`); if(c) c.style.display=''; const ci=$(`${role}-model-${res.provider}-custom`); if(ci) ci.value=res.model; } }
+  } else if (res.provider==='bedrock') {
+    if (res.region) { const r=$(`${role}-bedrock-region`); if(r) r.value=res.region; }
+    if (res.model)  {
+      const sel=$(`${role}-bedrock-profile`);
+      if (sel) { const opt=Array.from(sel.options).find(o=>o.value===res.model); if(opt) sel.value=res.model; else { sel.value='__custom__'; const c=$(`${role}-bedrock-custom-wrap`); if(c) c.style.display=''; const ci=$(`${role}-bedrock-profile-custom`); if(ci) ci.value=res.model; } }
+    }
+  }
+  if (res.key) { const k=$(`${role}-key`); if(k) k.value=res.key; }
+  if (resEl) { resEl.textContent=`Applied: ${res.provider} — ${res.model||res.endpoint||''}. Enter key if not detected, then test.`; resEl.style.color='var(--teal)'; }
+  return true;
+}
+
+// Inline CURL toggles
+$('btn-curl-target-toggle').addEventListener('click', () => {
+  const area=$('curl-target-area'); if(!area) return;
+  const open = area.style.display!=='none'; area.style.display=open?'none':'';
+  $('btn-curl-target-toggle').textContent=open?'▼ Import from CURL':'▲ Hide CURL';
+});
+$('btn-apply-target-curl-any').addEventListener('click', () => applyCurlToRole(val('target-curl-any'),'target','curl-result-target-any'));
+
+// Chat CURL import
+$('btn-chat-curl-import').addEventListener('click', () => {
+  const banner=$('curl-import-banner'); banner.style.display=banner.style.display==='none'?'':'none';
+});
+$('btn-cancel-curl').addEventListener('click', () => { $('curl-import-banner').style.display='none'; });
+$('btn-apply-chat-curl').addEventListener('click', async () => {
+  const curlStr = val('chat-curl-input');
+  const res = CURLParser.parse(curlStr);
+  const resEl = $('result-curl-chat');
+  if (res.error||!res.provider) { if(resEl){resEl.textContent='Error: '+(res.error||'unknown provider'); resEl.style.color='var(--red)';} return; }
+  if (!res.key) { if(resEl){resEl.textContent='No API key found in curl command — add manually'; resEl.style.color='var(--amber)';} return; }
+  if(resEl){resEl.textContent='Testing connection…'; resEl.style.color='var(--text-2)';}
+  try {
+    await ModelClient.test(res);
+    S.cfgs.curl_custom = res; S.connected.curl_custom = true;
+    $('curl-chat-tab').style.display='';
+    $('chat-mtab-lbl-curl').textContent=(res.model||res.provider).substring(0,14);
+    if(resEl){resEl.textContent=`✓ Connected — ${res.provider}/${res.model||''}`;resEl.style.color='var(--teal)';}
+    // Switch to curl tab
+    document.querySelectorAll('.chat-mtab').forEach(t=>t.classList.remove('active'));
+    $('curl-chat-tab').classList.add('active');
+    S.activeChatRole='curl_custom'; updateChatMeta();
+    $('curl-import-banner').style.display='none';
+  } catch(e) { if(resEl){resEl.textContent='✗ '+e.message.substring(0,100); resEl.style.color='var(--red)';} }
+});
+>>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
 
 // ── Security Audit ────────────────────────────────────────────────────────────
 $('btn-run-audit').addEventListener('click', () => {
@@ -2256,6 +2393,7 @@ $('btn-start-attack').addEventListener('click',async()=>{
       if (r.error_type) S.metrics.errors++;
       appendResultRow(r);
       updateMetrics();
+<<<<<<< HEAD
       // SOC-style family flagging: when a curl target hits a full_break, propagate to similar connections
       if (r.classifier_verdict === 'full_break' && S.cfgs.target?.provider === 'curl') {
         const family = S.cfgs.target?.modelFamily;
@@ -2268,6 +2406,10 @@ $('btn-start-attack').addEventListener('click',async()=>{
         }
       }
       // Checkpoint every 5 records so a refresh loses at most 5 records of progress.
+=======
+      // Checkpoint every 5 records so a refresh loses at most 5 records of progress.
+      // sessionEntry is in the same closure scope.
+>>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
       if (S.allRecords.length % 5 === 0) {
         sessionEntry.records    = S.allRecords.slice();
         sessionEntry.totalTurns = S.metrics.turns;
@@ -2422,6 +2564,7 @@ $('btn-start-attack').addEventListener('click',async()=>{
     } catch(e){ addLogEntry({type:'system',message:'Archive merge error: '+e.message,technique:'System'}); }
   }
 
+<<<<<<< HEAD
   // Export minimal kernels and store on sessionEntry for post-session features.
   if (S.activeAttacker && typeof S.activeAttacker.exportMinimalKernels === 'function') {
     try {
@@ -2434,6 +2577,8 @@ $('btn-start-attack').addEventListener('click',async()=>{
     } catch(e){ addLogEntry({type:'system',message:'Kernel export error: '+e.message,technique:'System'}); }
   }
 
+=======
+>>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
   // Auto-Tune merges — Tracks A / B / C / D. Each is opt-in via breakArchiveEnabled.
   // Stats-matrix and payload-stats need post-evaluation run verdicts; if parallel
   // evaluation ran, evaluator.lastRuns is already populated. Otherwise we merge
@@ -2464,6 +2609,7 @@ $('btn-start-attack').addEventListener('click',async()=>{
     } catch(e){ addLogEntry({type:'system',message:'Auto-Tune merge error: '+e.message,technique:'System'}); }
   }
 
+<<<<<<< HEAD
   // Regression suite generation — fire-and-forget (background, gated by breakArchiveEnabled).
   if (S.breakArchiveEnabled && sessionEntry.minimalKernels) {
     const _kernelsForSuites = sessionEntry.minimalKernels;
@@ -2491,6 +2637,8 @@ $('btn-start-attack').addEventListener('click',async()=>{
     })();
   }
 
+=======
+>>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
   // Housekeeping: drop the attacker reference so its closures are GC'd
   S.activeAttacker = null;
 
@@ -2982,9 +3130,12 @@ function loadSessionDetail(session) {
     }
   }
 
+<<<<<<< HEAD
   // ATMKE analysis panel — shows per-kernel transferability + corridor width controls.
   renderAtmkePanel(session);
 
+=======
+>>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
   _showResultsDetail();
 }
 
@@ -2997,6 +3148,7 @@ $('btn-clear-sessions').addEventListener('click', async () => {
   }
 });
 
+<<<<<<< HEAD
 // ── ATMKE Analysis Panel (Features 1 & 3) ────────────────────────────────────
 function renderAtmkePanel(session) {
   const panel = $('atmke-panel'); if (!panel) return;
@@ -3199,6 +3351,8 @@ if (_btnClearRegressionSuites) {
   });
 }
 
+=======
+>>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
 // ── Break Library ─────────────────────────────────────────────────────────────
 function _showBreakLibrary() {
   $('results-list-view').style.display = 'none';
@@ -4237,6 +4391,7 @@ renderCategoryGrid();
 renderTechniqueGrid();
 updateChatMeta();
 
+<<<<<<< HEAD
 // ── Target Profiler: IDP + DBRT ──────────────────────────────────────────────
 (function initProfilerHandlers() {
   let idpAttacker = null;
@@ -4556,6 +4711,8 @@ updateChatMeta();
   }
 })();
 
+=======
+>>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
 // ── Settings: load saved state, wire auto-save + toggle + clear ─────────
 // Run after the DOM is fully populated and provider-tab handlers exist.
 (function initSettingsPersistence() {
@@ -4590,9 +4747,12 @@ updateChatMeta();
   }
   // Load existing settings into the form fields.
   loadAllSettings();
+<<<<<<< HEAD
   // Populate saved connections panels (config card + connections view).
   renderSavedConnections();
   renderConnectionsView();
+=======
+>>>>>>> 2d5da23daf1d758165df91b9978517d3139c387a
   // Render the initial Attacker Ready pill (no connections tested yet → red).
   updateAttackerStatusPill();
 })();
