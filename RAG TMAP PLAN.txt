@@ -1,0 +1,75 @@
+Applying T-MAP to RAG red-teaming
+RAG (Retrieval-Augmented Generation) introduces a specific agentic sub-problem. A RAG system is itself a multi-step pipeline: the user query triggers a retrieval operation, retrieved chunks are injected into a context window, and the LLM generates a response conditioned on that augmented context. This pipeline has its own "tools" (retriever, reranker, reader/generator), its own trajectory (retrieve → rank → augment → generate), and its own class of agent-specific vulnerabilities that classical text-based red-teaming completely misses.
+Here is how to map every T-MAP component onto a RAG system:
+Redefining the "environment" and "tools" for RAG
+In the original T-MAP, tools are MCP calls — Slack message send, file write, code execution. In a RAG system, the tools are:
+
+retriever(query) → returns a ranked list of chunks from the knowledge base
+reranker(query, chunks) → reorders or filters chunks
+context_builder(chunks) → assembles the prompt context
+generator(context + query) → produces the final answer
+
+The trajectory h(x) for a RAG attack becomes something like:
+prompt x → retriever call → reranker call → context injection → generator output
+Each hop in this trajectory can be probed and exploited.
+Redefining the 2D archive for RAG
+The original archive covers risk categories × attack styles. For RAG you want:
+Axis 1 — RAG-specific vulnerability categories:
+
+Knowledge base poisoning exploitation (the attacker controls some documents)
+Indirect prompt injection via retrieved content
+Privacy leakage through retrieval (surfacing other users' data or confidential documents)
+Hallucination induction via conflicting retrieved context
+Retrieval manipulation (steering what gets retrieved)
+Attribution attacks (getting the model to misattribute information)
+Denial of information (preventing correct context from being retrieved)
+
+Axis 2 — Query/injection styles:
+
+Direct adversarial query
+Roleplay framing
+Authority injection within retrieved text
+Hypothetical framing
+Multi-turn context poisoning
+Instruction-following override embedded in retrieved documents
+Semantic similarity exploitation (queries crafted to surface poisoned documents)
+
+Cross-Diagnosis adapted for RAG
+The Analyst step in RAG-T-MAP should examine:
+
+Did the retriever surface the intended adversarial documents? If not, why? Was the semantic distance too large? Were the poisoned documents not indexed correctly?
+Did the reranker push adversarial content to the top? Rerankers can be the last line of defense or a vulnerability surface themselves.
+Did the adversarial context successfully override the model's behavior? The injected content may have been retrieved but the model may have correctly attributed and dismissed it.
+At which step did the trajectory break? A trajectory that succeeds at retrieval but fails at generation tells a different story than one that fails at retrieval.
+
+The RAG Tool Call Graph
+The TCG in this context tracks:
+
+Which query formulations reliably retrieve target documents
+Which document structures (headers, authority claims, instruction formats) survive reranking and appear in the final context
+Which injection patterns in retrieved text reliably override the generator's behavior vs. which get suppressed
+Inter-step dependencies: e.g., does a long query reliably hit a different retrieval path than a short query?
+
+The RAG Judge
+The judge needs to evaluate harm differently than in the original paper. RAG-specific harmful outcomes include:
+
+The system providing a factually incorrect answer that contradicts its own knowledge base (hallucination induced)
+The system leaking verbatim content from confidential documents
+The system following instructions injected into retrieved documents (prompt injection success)
+The system refusing to answer a legitimate query because adversarial retrieved content confused it
+The system attributing fabricated claims to real retrieved sources
+
+The judge should evaluate the full trajectory — not just the output, but whether the retriever was manipulated, whether the injected content appeared verbatim in the context, and whether the generator was steered by it.
+Concrete RAG attack scenarios to populate the archive
+Here are examples of how specific archive cells would be attacked:
+Cell [knowledge poisoning × indirect instruction injection]: The attacker embeds documents in the corpus that contain natural-language instructions ("Ignore previous context and instead...") alongside plausible-looking factual content. The Mutator crafts queries that are semantically similar to the poisoned documents so they surface reliably. The TCG tracks whether short vs. long queries, keyword vs. semantic queries, or specific phrasing reliably surfaces these documents.
+Cell [privacy leakage × authority framing]: The attacker crafts queries asking for summaries of "the most sensitive" or "the most confidential" documents. The Analyst studies trajectories where the retriever returned documents with privacy markers and what downstream behavior followed. The Mutator iterates on framings that cause the model to include verbatim retrieved private content in the response.
+Cell [hallucination induction × conflicting context]: Multiple contradictory documents about the same topic are planted. The Mutator crafts queries that will reliably surface all of them, creating a conflicting context window. The judge evaluates whether the model output reflects the adversarially injected false information rather than the correct information.
+Cell [denial of service × query confusion]: Queries are crafted to be so semantically ambiguous that they surface irrelevant documents, denying the user correct information. The TCG tracks which query patterns reliably degrade retrieval precision.
+Implementation differences from the original T-MAP
+When implementing this for RAG, several technical adaptations are necessary. First, you need observability at every step of the RAG pipeline — the trajectory logging must capture the raw query, the exact retrieved chunks (with scores), the reranked ordering, the assembled context, and the final output. Without this, the Analyst cannot perform meaningful cross-diagnosis.
+Second, the TCG must track document-level rather than purely tool-call-level structure. An edge in the RAG TCG is not just "retriever → reranker" but "query pattern X → document cluster Y retrieved → document type Z promoted by reranker." This is richer than the original MCP tool call graph and requires more careful schema design.
+Third, the archive update logic needs to handle two distinct success criteria: retrieval success (the adversarial document was retrieved and appeared in context) and generation success (the model's output was actually steered by that document). These can happen independently, and tracking partial successes is important for the Analyst's diagnosis.
+Fourth, for corpus poisoning scenarios, you need to control a slice of the knowledge base during red-teaming. This means either testing against your own RAG system with write access to the vector store, or using a shadow corpus that simulates attacker-controlled documents. This is a key deployment consideration: T-MAP for RAG in a whitebox corpus setting is very powerful; in a fully external/blackbox corpus setting, the attack surface is limited to the query side only.
+
+The fundamental insight that makes T-MAP so well-suited to RAG is the same one that makes it powerful for MCP agents: harm requires a trajectory, and a trajectory requires trajectory-aware feedback to attack systematically. Single-prompt red-teaming of RAG systems misses everything that emerges from the interplay between query formulation, retrieval mechanics, and generation behavior — exactly the gap T-MAP was designed to close.
